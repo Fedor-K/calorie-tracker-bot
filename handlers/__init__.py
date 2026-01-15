@@ -6,6 +6,7 @@ from handlers.water import router as water_router
 from handlers.activity import router as activity_router
 from handlers.stats import router as stats_router
 from handlers.settings import router as settings_router
+from handlers.health import router as health_router
 
 
 def setup_routers() -> Router:
@@ -19,5 +20,6 @@ def setup_routers() -> Router:
     main_router.include_router(activity_router)
     main_router.include_router(stats_router)
     main_router.include_router(settings_router)
+    main_router.include_router(health_router)
 
     return main_router
