@@ -7,7 +7,6 @@ from handlers.activity import router as activity_router
 from handlers.stats import router as stats_router
 from handlers.settings import router as settings_router
 from handlers.health import router as health_router
-from handlers.whoop import router as whoop_router
 
 
 def setup_routers() -> Router:
@@ -23,6 +22,5 @@ def setup_routers() -> Router:
     main_router.include_router(stats_router)
     main_router.include_router(settings_router)
     main_router.include_router(health_router)
-    main_router.include_router(whoop_router)
 
     return main_router
