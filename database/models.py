@@ -30,6 +30,12 @@ class User(Base):
     remind_weight: Mapped[bool] = mapped_column(Boolean, default=True)
     timezone: Mapped[str] = mapped_column(String(50), default="Europe/Moscow")
 
+    # WHOOP интеграция
+    whoop_access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    whoop_refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    whoop_token_expires: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    whoop_user_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationships
