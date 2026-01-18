@@ -1394,3 +1394,115 @@ async def handle_fitness_photo(user_id: int, fitness_data: dict) -> str:
         response += f"\n\n📝 {summary}"
 
     return response
+
+
+async def handle_medical_photo(user_id: int, medical_data: dict) -> str:
+    """
+    Обрабатывает фото медицинских анализов и сохраняет в память пользователя
+
+    Args:
+        user_id: ID пользователя
+        medical_data: Данные анализов от AI
+
+    Returns:
+        Форматированный текст ответа
+    """
+    logger.info(f"[MEDICAL] user={user_id} | AI response: {medical_data}")
+
+    analysis_type = medical_data.get("analysis_type", "анализы")
+    date = medical_data.get("date", "")
+    indicators = medical_data.get("indicators", [])
+    summary = medical_data.get("summary", "")
+    recommendations = medical_data.get("nutrition_recommendations", [])
+    concerns = medical_data.get("concerns", [])
+
+    # Формируем заголовок
+    type_emoji = {
+        "кровь": "🩸",
+        "биохимия": "🧪",
+        "моча": "💧",
+        "гормоны": "⚗️"
+    }
+    emoji = type_emoji.get(analysis_type, "🔬")
+
+    response = f"{emoji} **Анализ: {analysis_type}**"
+    if date:
+        response += f" ({date})"
+    response += "\n\n"
+
+    # Показываем показатели
+    if indicators:
+        response += "📋 **Показатели:**\n"
+        for i, ind in enumerate(indicators):
+            name = ind.get("name", "?")
+            value = ind.get("value", "?")
+            unit = ind.get("unit", "")
+            ref_range = ind.get("reference_range", "")
+            status = ind.get("status", "normal")
+
+            # Иконка статуса
+            if status == "high":
+                status_icon = "🔴 ↑"
+            elif status == "low":
+                status_icon = "🔵 ↓"
+            else:
+                status_icon = "✅"
+
+            # Форматируем строку
+            is_last = i == len(indicators) - 1
+            prefix = "└" if is_last else "├"
+
+            line = f"{prefix} {name}: **{value}** {unit} {status_icon}"
+            if ref_range and status != "normal":
+                line += f" (норма: {ref_range})"
+            response += line + "\n"
+
+    # Проблемные показатели
+    if concerns:
+        response += "\n⚠️ **Обратить внимание:**\n"
+        for concern in concerns:
+            response += f"• {concern}\n"
+
+    # Рекомендации по питанию
+    if recommendations:
+        response += "\n🥗 **Рекомендации по питанию:**\n"
+        for rec in recommendations:
+            response += f"• {rec}\n"
+
+    # Краткое резюме
+    if summary:
+        response += f"\n📝 {summary}"
+
+    # Сохраняем в память пользователя
+    memory_parts = []
+
+    # Сохраняем проблемные показатели
+    problem_indicators = [
+        ind for ind in indicators
+        if ind.get("status") in ["high", "low"]
+    ]
+
+    if problem_indicators:
+        for ind in problem_indicators:
+            name = ind.get("name", "?")
+            status = ind.get("status")
+            value = ind.get("value", "?")
+            unit = ind.get("unit", "")
+
+            status_text = "повышен" if status == "high" else "понижен"
+            memory_text = f"{name} {status_text}: {value} {unit}"
+            memory_parts.append(memory_text)
+
+    # Сохраняем рекомендации
+    if recommendations:
+        for rec in recommendations[:3]:  # Максимум 3 рекомендации
+            memory_parts.append(f"Рекомендация: {rec}")
+
+    # Записываем в память
+    if memory_parts:
+        for memory_text in memory_parts:
+            await save_memory(user_id, "medical", memory_text)
+
+        response += "\n\n📝 _Запомнил для будущих рекомендаций_"
+
+    return response

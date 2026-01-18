@@ -14,7 +14,7 @@ from sqlalchemy import select
 from database.db import async_session
 from database.models import User
 from services.ai import analyze_food_image, analyze_food_images_batch
-from services.coach import format_food_analysis, handle_fitness_photo, get_user_context
+from services.coach import format_food_analysis, handle_fitness_photo, handle_medical_photo, get_user_context
 from keyboards.main import get_main_keyboard, get_food_confirm_keyboard
 
 logger = logging.getLogger(__name__)
@@ -113,10 +113,26 @@ async def _process_album(media_group_id: str, bot: Bot):
                 reply_markup=get_food_confirm_keyboard()
             )
 
+        elif photo_type == "medical":
+            # Медицинские анализы
+            response = await handle_medical_photo(user_id, photo_data)
+            logger.info(f"[ALBUM] user={user_id} | Medical: {photo_data.get('analysis_type', '?')}")
+
+            if processing_msg:
+                try:
+                    await processing_msg.delete()
+                except Exception:
+                    pass
+            await first_message.answer(
+                response,
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard()
+            )
+
         else:
             # Другое
             description = photo_data.get("description", "Не удалось распознать")
-            response = f"🤔 Это не похоже на еду или фитнес-трекер.\n\n{description}"
+            response = f"🤔 Это не похоже на еду, фитнес-трекер или анализы.\n\n{description}"
             logger.info(f"[ALBUM] user={user_id} | Other: {description[:50]}")
 
             if processing_msg:
@@ -261,10 +277,22 @@ async def handle_photo(message: Message, state: FSMContext):
                 reply_markup=get_food_confirm_keyboard()
             )
 
+        elif photo_type == "medical":
+            # Медицинские анализы - показываем и сохраняем в память
+            response = await handle_medical_photo(user_id, photo_data)
+            logger.info(f"[PHOTO] user={user_id} | Medical: {photo_data.get('analysis_type', '?')}")
+
+            await processing_msg.delete()
+            await message.answer(
+                response,
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard()
+            )
+
         else:
             # Другое фото
             description = photo_data.get("description", "Не удалось распознать")
-            response = f"🤔 Это не похоже на еду или фитнес-трекер.\n\n{description}"
+            response = f"🤔 Это не похоже на еду, фитнес-трекер или анализы.\n\n{description}"
             logger.info(f"[PHOTO] user={user_id} | Other: {description[:50]}")
 
             await processing_msg.delete()
