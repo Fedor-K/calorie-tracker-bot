@@ -606,48 +606,52 @@ PHOTO_ANALYSIS_PROMPT = """Проанализируй фото. Это може�
 - Для еды: оценивай порции реалистично по размеру на фото"""
 
 
-ALBUM_ANALYSIS_PROMPT = """Проанализируй ВСЕ фото как ОДИН приём пищи (пользователь отправил альбом из нескольких фото).
+ALBUM_ANALYSIS_PROMPT = """Ты получил НЕСКОЛЬКО фото (альбом). Это один приём пищи из нескольких блюд/продуктов.
 
-ВАЖНО: Отвечай ТОЛЬКО валидным JSON без markdown.
+КРИТИЧЕСКИ ВАЖНО:
+- Тебе отправлено {photo_count} фото
+- Ты ОБЯЗАН создать МИНИМУМ {photo_count} элементов в items (по одному на каждое фото)
+- Каждое фото = ОТДЕЛЬНЫЙ item, даже если блюда похожи
+- НЕ объединяй фото в один item
 
-Это фото одного приёма пищи (например завтрак из нескольких блюд). Проанализируй ВСЕ фото и объедини в один результат.
+Отвечай ТОЛЬКО валидным JSON без markdown:
 
-Верни JSON:
-{
+{{
     "type": "food",
-    "description": "Общее название приёма пищи (например: Завтрак: овсянка, яблоко и кофе)",
+    "description": "Общее название (например: Обед: суп, салат и хлеб)",
     "items": [
-        {
-            "name": "название блюда/продукта с фото 1",
-            "portion": "примерная порция",
+        {{
+            "photo_number": 1,
+            "name": "название с фото 1",
+            "portion": "порция",
             "calories": число,
             "protein": число,
             "carbs": число,
             "fat": число
-        },
-        {
-            "name": "название блюда/продукта с фото 2",
-            ...
-        }
+        }},
+        {{
+            "photo_number": 2,
+            "name": "название с фото 2",
+            "portion": "порция",
+            "calories": число,
+            "protein": число,
+            "carbs": число,
+            "fat": число
+        }}
     ],
-    "total": {
-        "calories": СУММА калорий всех блюд,
-        "protein": СУММА белка,
-        "carbs": СУММА углеводов,
-        "fat": СУММА жиров,
-        "fiber": СУММА клетчатки
-    },
+    "total": {{
+        "calories": СУММА,
+        "protein": СУММА,
+        "carbs": СУММА,
+        "fat": СУММА,
+        "fiber": СУММА
+    }},
     "meal_type": "breakfast" | "lunch" | "dinner" | "snack",
-    "health_notes": "общий комментарий о приёме пищи",
-    "health_score": число от 1 до 10 (средняя оценка),
-    "healthy_alternatives": ["альтернатива 1", "альтернатива 2"]
-}
+    "health_notes": "комментарий",
+    "health_score": 1-10
+}}
 
-ВАЖНО:
-- Каждое фото = отдельный item в списке items
-- total = СУММА всех items
-- Если на каком-то фото НЕ еда - пропусти его
-- Оценивай порции реалистично по размеру на фото"""
+ПОМНИ: items должен содержать РОВНО {photo_count} элементов!"""
 
 
 async def analyze_food_images_batch(images_data: list[tuple[bytes, str]]) -> dict:
@@ -664,10 +668,17 @@ async def analyze_food_images_batch(images_data: list[tuple[bytes, str]]) -> dic
         # Одно фото - используем обычный анализ
         return await analyze_food_image(images_data[0][0], images_data[0][1])
 
+    photo_count = len(images_data)
+    logger.info(f"[AI] Analyzing album with {photo_count} photos")
+
     # Формируем контент с несколькими изображениями
     content = []
-    for image_bytes, mime_type in images_data:
+    for i, (image_bytes, mime_type) in enumerate(images_data, 1):
         base64_image = base64.b64encode(image_bytes).decode("utf-8")
+        content.append({
+            "type": "text",
+            "text": f"--- ФОТО {i} из {photo_count} ---"
+        })
         content.append({
             "type": "image",
             "source": {
@@ -677,9 +688,11 @@ async def analyze_food_images_batch(images_data: list[tuple[bytes, str]]) -> dic
             }
         })
 
+    # Форматируем промпт с количеством фото
+    prompt_text = ALBUM_ANALYSIS_PROMPT.format(photo_count=photo_count)
     content.append({
         "type": "text",
-        "text": ALBUM_ANALYSIS_PROMPT
+        "text": prompt_text
     })
 
     payload = {
@@ -715,11 +728,20 @@ async def analyze_food_images_batch(images_data: list[tuple[bytes, str]]) -> dic
             content_text = content_text[:-3]
         content_text = content_text.strip()
 
-        return json.loads(content_text)
+        result = json.loads(content_text)
+        items_count = len(result.get("items", []))
+        logger.info(f"[AI] Album result: {items_count} items from {photo_count} photos")
+
+        # Если AI вернул меньше items чем фото - логируем предупреждение
+        if items_count < photo_count:
+            logger.warning(f"[AI] Fewer items ({items_count}) than photos ({photo_count})!")
+
+        return result
     except json.JSONDecodeError:
+        logger.error(f"[AI] Failed to parse album response: {content_text[:200]}")
         return {
             "type": "food",
-            "description": f"Приём пищи ({len(images_data)} фото)",
+            "description": f"Приём пищи ({photo_count} фото)",
             "total": {"calories": 0, "protein": 0, "carbs": 0, "fat": 0, "fiber": 0},
             "meal_type": "snack",
             "health_notes": "Не удалось точно определить состав",
