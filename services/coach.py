@@ -1161,7 +1161,11 @@ async def format_food_analysis(
 
     if saved:
         # Уже записано - показываем итог
+        progress_pct = min(100, int(calories_eaten / calorie_goal * 100)) if calorie_goal else 0
+        bar = "█" * (progress_pct // 10) + "░" * (10 - progress_pct // 10)
+
         response += f"\n📈 **Итого за сегодня:**\n"
+        response += f"[{bar}] {progress_pct}%\n"
         response += f"├ Калории: {calories_eaten} / {calorie_goal} ккал\n"
         response += f"├ Белок: {protein_eaten} / {protein_goal} г\n"
         response += f"└ Вода: {water_drunk} / {water_goal} мл\n"
@@ -1170,8 +1174,11 @@ async def format_food_analysis(
         new_calories = calories_eaten + this_meal_cal
         new_protein = protein_eaten + this_meal_protein
         calories_left = calorie_goal - new_calories
+        progress_pct = min(100, int(new_calories / calorie_goal * 100)) if calorie_goal else 0
+        bar = "█" * (progress_pct // 10) + "░" * (10 - progress_pct // 10)
 
         response += f"\n📈 **После записи будет:**\n"
+        response += f"[{bar}] {progress_pct}%\n"
         response += f"├ Калории: {new_calories} / {calorie_goal} ккал"
         if calories_left > 0:
             response += f" (ещё {calories_left})\n"
