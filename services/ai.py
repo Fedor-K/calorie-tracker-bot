@@ -216,6 +216,36 @@ COACH_TOOLS = [
             },
             "required": ["confirm"]
         }
+    },
+    {
+        "name": "list_today_water",
+        "description": "Показать все записи воды за сегодня.",
+        "input_schema": {
+            "type": "object",
+            "properties": {}
+        }
+    },
+    {
+        "name": "clear_today_water",
+        "description": "Удалить ВСЕ записи воды за сегодня. Используй если пользователь хочет сбросить воду.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "confirm": {"type": "boolean", "description": "Подтверждение удаления"}
+            },
+            "required": ["confirm"]
+        }
+    },
+    {
+        "name": "set_today_water",
+        "description": "Установить конкретное количество воды за сегодня (сбросить и записать новое значение).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "amount_ml": {"type": "integer", "description": "Количество воды в мл"}
+            },
+            "required": ["amount_ml"]
+        }
     }
 ]
 

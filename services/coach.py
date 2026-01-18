@@ -64,11 +64,11 @@ async def get_user_context(user_id: int) -> dict:
         )
         foods = food_result.scalars().all()
 
-        calories_today = sum(f.calories for f in foods)
-        protein_today = sum(f.protein for f in foods)
-        carbs_today = sum(f.carbs for f in foods)
-        fat_today = sum(f.fat for f in foods)
-        meals_today = [f.description for f in foods]
+        calories_today = sum(f.calories or 0 for f in foods)
+        protein_today = sum(f.protein or 0 for f in foods)
+        carbs_today = sum(f.carbs or 0 for f in foods)
+        fat_today = sum(f.fat or 0 for f in foods)
+        meals_today = [f.description for f in foods if f.description]
 
         # Вода за сегодня
         water_result = await session.execute(
@@ -175,6 +175,15 @@ async def execute_tool(user_id: int, tool_name: str, tool_input: dict) -> dict:
 
         elif tool_name == "clear_today_food":
             return await _clear_today_food(user_id, tool_input)
+
+        elif tool_name == "list_today_water":
+            return await _list_today_water(user_id)
+
+        elif tool_name == "clear_today_water":
+            return await _clear_today_water(user_id, tool_input)
+
+        elif tool_name == "set_today_water":
+            return await _set_today_water(user_id, tool_input)
 
         else:
             return {"success": False, "message": f"Unknown tool: {tool_name}"}
@@ -844,6 +853,123 @@ async def _clear_today_food(user_id: int, data: dict) -> dict:
             "success": True,
             "data": {"deleted_count": count},
             "message": f"Удалено {count} записей еды за сегодня"
+        }
+
+
+async def _list_today_water(user_id: int) -> dict:
+    """Показать все записи воды за сегодня"""
+    async with async_session() as session:
+        user_result = await session.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+
+        try:
+            tz = ZoneInfo(user.timezone if user else "Europe/Moscow")
+        except Exception:
+            tz = ZoneInfo("Europe/Moscow")
+
+        now_local = datetime.now(tz)
+        day_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start_utc = day_start.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+        result = await session.execute(
+            select(WaterEntry)
+            .where(WaterEntry.user_id == user_id)
+            .where(WaterEntry.created_at >= day_start_utc)
+            .order_by(WaterEntry.created_at)
+        )
+        entries = result.scalars().all()
+
+        total = sum(e.amount or 0 for e in entries)
+        entries_list = [
+            {"time": e.created_at.strftime("%H:%M"), "amount": e.amount}
+            for e in entries
+        ]
+
+        return {
+            "success": True,
+            "data": {"entries": entries_list, "total": total},
+            "message": f"Вода за сегодня: {total} мл ({len(entries)} записей)"
+        }
+
+
+async def _clear_today_water(user_id: int, data: dict) -> dict:
+    """Удалить все записи воды за сегодня"""
+    if not data.get("confirm"):
+        return {"success": False, "message": "Требуется подтверждение (confirm: true)"}
+
+    async with async_session() as session:
+        user_result = await session.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+
+        try:
+            tz = ZoneInfo(user.timezone if user else "Europe/Moscow")
+        except Exception:
+            tz = ZoneInfo("Europe/Moscow")
+
+        now_local = datetime.now(tz)
+        day_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start_utc = day_start.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+        count_result = await session.execute(
+            select(func.count(WaterEntry.id))
+            .where(WaterEntry.user_id == user_id)
+            .where(WaterEntry.created_at >= day_start_utc)
+        )
+        count = count_result.scalar_one() or 0
+
+        await session.execute(
+            delete(WaterEntry)
+            .where(WaterEntry.user_id == user_id)
+            .where(WaterEntry.created_at >= day_start_utc)
+        )
+        await session.commit()
+
+        logger.info(f"[WATER] user={user_id} | Cleared {count} water entries")
+
+        return {
+            "success": True,
+            "data": {"deleted_count": count},
+            "message": f"Удалено {count} записей воды за сегодня"
+        }
+
+
+async def _set_today_water(user_id: int, data: dict) -> dict:
+    """Установить конкретное количество воды за сегодня"""
+    amount = data.get("amount_ml", 0)
+
+    async with async_session() as session:
+        user_result = await session.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+
+        try:
+            tz = ZoneInfo(user.timezone if user else "Europe/Moscow")
+        except Exception:
+            tz = ZoneInfo("Europe/Moscow")
+
+        now_local = datetime.now(tz)
+        day_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start_utc = day_start.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+        # Удаляем все записи за сегодня
+        await session.execute(
+            delete(WaterEntry)
+            .where(WaterEntry.user_id == user_id)
+            .where(WaterEntry.created_at >= day_start_utc)
+        )
+
+        # Создаём одну запись с нужным количеством
+        if amount > 0:
+            entry = WaterEntry(user_id=user_id, amount=amount)
+            session.add(entry)
+
+        await session.commit()
+
+        logger.info(f"[WATER] user={user_id} | Set water to {amount} ml")
+
+        return {
+            "success": True,
+            "data": {"water": amount},
+            "message": f"Вода за сегодня: {amount} мл"
         }
 
 
