@@ -1103,6 +1103,7 @@ async def format_food_analysis(
         user_context = await get_user_context(user_id)
 
     total = food_data.get("total", {})
+    items = food_data.get("items", [])
     description = food_data.get("description", "Анализ еды")
 
     # Формируем ответ
@@ -1112,7 +1113,20 @@ async def format_food_analysis(
         response = f"📸 **Анализ фото**\n\n"
     response += f"🍽 **{description}**\n\n"
 
-    response += "📊 **КБЖУ:**\n"
+    # Если несколько блюд (альбом) - показываем каждое отдельно
+    if len(items) > 1:
+        response += "📋 **Состав:**\n"
+        for item in items:
+            name = item.get("name", "?")
+            cal = item.get("calories", 0)
+            portion = item.get("portion", "")
+            if portion:
+                response += f"• {name} ({portion}) — {cal} ккал\n"
+            else:
+                response += f"• {name} — {cal} ккал\n"
+        response += "\n"
+
+    response += "📊 **КБЖУ (итого):**\n"
     response += f"├ 🔥 Калории: {total.get('calories', 0)} ккал\n"
     response += f"├ 🥩 Белки: {total.get('protein', 0)} г\n"
     response += f"├ 🍞 Углеводы: {total.get('carbs', 0)} г\n"

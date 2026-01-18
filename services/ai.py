@@ -606,6 +606,127 @@ PHOTO_ANALYSIS_PROMPT = """Проанализируй фото. Это може�
 - Для еды: оценивай порции реалистично по размеру на фото"""
 
 
+ALBUM_ANALYSIS_PROMPT = """Проанализируй ВСЕ фото как ОДИН приём пищи (пользователь отправил альбом из нескольких фото).
+
+ВАЖНО: Отвечай ТОЛЬКО валидным JSON без markdown.
+
+Это фото одного приёма пищи (например завтрак из нескольких блюд). Проанализируй ВСЕ фото и объедини в один результат.
+
+Верни JSON:
+{
+    "type": "food",
+    "description": "Общее название приёма пищи (например: Завтрак: овсянка, яблоко и кофе)",
+    "items": [
+        {
+            "name": "название блюда/продукта с фото 1",
+            "portion": "примерная порция",
+            "calories": число,
+            "protein": число,
+            "carbs": число,
+            "fat": число
+        },
+        {
+            "name": "название блюда/продукта с фото 2",
+            ...
+        }
+    ],
+    "total": {
+        "calories": СУММА калорий всех блюд,
+        "protein": СУММА белка,
+        "carbs": СУММА углеводов,
+        "fat": СУММА жиров,
+        "fiber": СУММА клетчатки
+    },
+    "meal_type": "breakfast" | "lunch" | "dinner" | "snack",
+    "health_notes": "общий комментарий о приёме пищи",
+    "health_score": число от 1 до 10 (средняя оценка),
+    "healthy_alternatives": ["альтернатива 1", "альтернатива 2"]
+}
+
+ВАЖНО:
+- Каждое фото = отдельный item в списке items
+- total = СУММА всех items
+- Если на каком-то фото НЕ еда - пропусти его
+- Оценивай порции реалистично по размеру на фото"""
+
+
+async def analyze_food_images_batch(images_data: list[tuple[bytes, str]]) -> dict:
+    """
+    Анализирует НЕСКОЛЬКО фото как один приём пищи (альбом)
+
+    Args:
+        images_data: Список кортежей (image_bytes, mime_type)
+
+    Returns:
+        Объединённый анализ всех фото
+    """
+    if len(images_data) == 1:
+        # Одно фото - используем обычный анализ
+        return await analyze_food_image(images_data[0][0], images_data[0][1])
+
+    # Формируем контент с несколькими изображениями
+    content = []
+    for image_bytes, mime_type in images_data:
+        base64_image = base64.b64encode(image_bytes).decode("utf-8")
+        content.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": mime_type,
+                "data": base64_image
+            }
+        })
+
+    content.append({
+        "type": "text",
+        "text": ALBUM_ANALYSIS_PROMPT
+    })
+
+    payload = {
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 2000,
+        "messages": [{"role": "user", "content": content}]
+    }
+
+    headers = {
+        "x-api-key": config.CLAUDE_API_KEY,
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01"
+    }
+
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        response = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            json=payload,
+            headers=headers
+        )
+        response.raise_for_status()
+        result = response.json()
+
+    content_text = result["content"][0]["text"]
+
+    try:
+        content_text = content_text.strip()
+        if content_text.startswith("```json"):
+            content_text = content_text[7:]
+        if content_text.startswith("```"):
+            content_text = content_text[3:]
+        if content_text.endswith("```"):
+            content_text = content_text[:-3]
+        content_text = content_text.strip()
+
+        return json.loads(content_text)
+    except json.JSONDecodeError:
+        return {
+            "type": "food",
+            "description": f"Приём пищи ({len(images_data)} фото)",
+            "total": {"calories": 0, "protein": 0, "carbs": 0, "fat": 0, "fiber": 0},
+            "meal_type": "snack",
+            "health_notes": "Не удалось точно определить состав",
+            "raw_response": content_text
+        }
+
+
 async def analyze_food_image(image_data: bytes, mime_type: str = "image/jpeg") -> dict:
     """
     Анализирует фото через Claude Vision API
