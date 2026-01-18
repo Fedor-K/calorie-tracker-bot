@@ -1051,6 +1051,27 @@ async def handle_message(user_id: int, message_text: str) -> str:
         )
         response_text = final_response
 
+        # Если AI вернул пустой ответ после инструментов - генерируем fallback
+        if not response_text or not response_text.strip():
+            tool_messages = [r.get("content", "") for r in tool_results_data]
+            try:
+                # Пытаемся извлечь message из tool results
+                fallback_parts = []
+                for tm in tool_messages:
+                    parsed = json.loads(tm)
+                    if parsed.get("message"):
+                        fallback_parts.append(parsed["message"])
+                if fallback_parts:
+                    response_text = "✅ Готово!\n\n" + "\n".join(f"• {p}" for p in fallback_parts)
+                else:
+                    response_text = "✅ Готово!"
+            except Exception:
+                response_text = "✅ Готово!"
+
+    # Финальная проверка на пустой ответ
+    if not response_text or not response_text.strip():
+        response_text = "Готово! Чем ещё могу помочь?"
+
     # 5. Сохраняем сообщения в историю
     await save_message(user_id, "user", message_text)
     await save_message(user_id, "assistant", response_text)
