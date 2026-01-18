@@ -14,6 +14,7 @@ router = Router()
 class SettingsStates(StatesGroup):
     waiting_for_calories = State()
     waiting_for_water = State()
+    waiting_for_current_weight = State()
     waiting_for_target_weight = State()
     waiting_for_height = State()
 
@@ -52,7 +53,8 @@ async def show_settings(message: Message):
         f"⚙️ **Настройки**\n\n"
         f"🎯 Цель калорий: **{user.calorie_goal}** ккал\n"
         f"💧 Цель воды: **{user.water_goal}** мл\n"
-        f"⚖️ Целевой вес: **{user.target_weight or 'не указан'}** кг\n"
+        f"⚖️ Текущий вес: **{user.current_weight or 'не указан'}** кг\n"
+        f"🎯 Целевой вес: **{user.target_weight or 'не указан'}** кг\n"
         f"📏 Рост: **{user.height or 'не указан'}** см\n\n"
         f"🔔 Напоминания:\n"
         f"  💧 Вода: {'✅' if user.remind_water else '❌'}\n"
@@ -147,6 +149,47 @@ async def process_water_input(message: Message, state: FSMContext):
 
     except ValueError:
         await message.answer("❌ Отправь число")
+
+
+@router.callback_query(F.data == "set_current_weight")
+async def set_current_weight_callback(callback: CallbackQuery, state: FSMContext):
+    """Установка текущего веса"""
+    await callback.message.edit_text(
+        "⚖️ **Текущий вес**\n\n"
+        "Отправь свой вес в кг (например: 75.5)",
+        parse_mode="Markdown"
+    )
+    await state.set_state(SettingsStates.waiting_for_current_weight)
+    await callback.answer()
+
+
+@router.message(SettingsStates.waiting_for_current_weight)
+async def process_current_weight_input(message: Message, state: FSMContext):
+    """Обработка ввода текущего веса"""
+    if message.text.startswith("/") or message.text in MENU_BUTTONS:
+        await state.clear()
+        return
+
+    try:
+        weight = float(message.text.replace(",", "."))
+        if weight < 30 or weight > 300:
+            await message.answer("❌ Укажи реальный вес (30-300 кг)")
+            return
+
+        async with async_session() as session:
+            result = await session.execute(
+                select(User).where(User.id == message.from_user.id)
+            )
+            user = result.scalar_one_or_none()
+            if user:
+                user.current_weight = weight
+                await session.commit()
+
+        await message.answer(f"✅ Текущий вес: **{weight}** кг", parse_mode="Markdown")
+        await state.clear()
+
+    except ValueError:
+        await message.answer("❌ Отправь число (например: 75.5)")
 
 
 @router.callback_query(F.data == "set_target_weight")

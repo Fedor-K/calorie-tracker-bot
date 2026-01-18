@@ -52,7 +52,8 @@ def get_settings_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="🎯 Цель калорий", callback_data="set_calories")],
             [InlineKeyboardButton(text="💧 Цель воды", callback_data="set_water")],
-            [InlineKeyboardButton(text="⚖️ Целевой вес", callback_data="set_target_weight")],
+            [InlineKeyboardButton(text="⚖️ Текущий вес", callback_data="set_current_weight")],
+            [InlineKeyboardButton(text="🎯 Целевой вес", callback_data="set_target_weight")],
             [InlineKeyboardButton(text="📏 Рост", callback_data="set_height")],
             [InlineKeyboardButton(text="🔔 Напоминания", callback_data="set_reminders")],
             [InlineKeyboardButton(text="❌ Закрыть", callback_data="close_settings")]
