@@ -170,6 +170,52 @@ COACH_TOOLS = [
             },
             "required": ["confirm"]
         }
+    },
+    {
+        "name": "list_today_food",
+        "description": "Показать все записи еды за сегодня с номерами. Используй когда пользователь хочет посмотреть что записано или исправить.",
+        "input_schema": {
+            "type": "object",
+            "properties": {}
+        }
+    },
+    {
+        "name": "delete_food_entry",
+        "description": "Удалить запись еды. Используй когда пользователь говорит удалить конкретную еду (по номеру или описанию).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "entry_number": {"type": "integer", "description": "Номер записи из списка (1, 2, 3...)"},
+                "description_match": {"type": "string", "description": "Часть описания для поиска (например 'яичница' или 'мороженое')"}
+            }
+        }
+    },
+    {
+        "name": "update_food_entry",
+        "description": "Изменить запись еды. Используй когда пользователь хочет исправить калории или описание конкретной еды.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "entry_number": {"type": "integer", "description": "Номер записи из списка"},
+                "description_match": {"type": "string", "description": "Часть описания для поиска"},
+                "new_description": {"type": "string", "description": "Новое описание"},
+                "new_calories": {"type": "integer", "description": "Новые калории"},
+                "new_protein": {"type": "number", "description": "Новый белок"},
+                "new_carbs": {"type": "number", "description": "Новые углеводы"},
+                "new_fat": {"type": "number", "description": "Новые жиры"}
+            }
+        }
+    },
+    {
+        "name": "clear_today_food",
+        "description": "Удалить ВСЕ записи еды за сегодня. Используй ТОЛЬКО если пользователь явно просит сбросить всё.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "confirm": {"type": "boolean", "description": "Подтверждение удаления"}
+            },
+            "required": ["confirm"]
+        }
     }
 ]
 

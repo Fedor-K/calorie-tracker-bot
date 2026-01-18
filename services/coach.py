@@ -164,6 +164,18 @@ async def execute_tool(user_id: int, tool_name: str, tool_input: dict) -> dict:
         elif tool_name == "clear_today_activities":
             return await _clear_today_activities(user_id, tool_input)
 
+        elif tool_name == "list_today_food":
+            return await _list_today_food(user_id)
+
+        elif tool_name == "delete_food_entry":
+            return await _delete_food_entry(user_id, tool_input)
+
+        elif tool_name == "update_food_entry":
+            return await _update_food_entry(user_id, tool_input)
+
+        elif tool_name == "clear_today_food":
+            return await _clear_today_food(user_id, tool_input)
+
         else:
             return {"success": False, "message": f"Unknown tool: {tool_name}"}
 
@@ -611,6 +623,227 @@ async def _clear_today_activities(user_id: int, data: dict) -> dict:
             "success": True,
             "data": {"deleted_count": count},
             "message": f"Удалено {count} активностей за сегодня"
+        }
+
+
+async def _list_today_food(user_id: int) -> dict:
+    """Показать все записи еды за сегодня"""
+    async with async_session() as session:
+        user_result = await session.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+
+        try:
+            tz = ZoneInfo(user.timezone if user else "Europe/Moscow")
+        except Exception:
+            tz = ZoneInfo("Europe/Moscow")
+
+        now_local = datetime.now(tz)
+        day_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start_utc = day_start.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+        result = await session.execute(
+            select(FoodEntry)
+            .where(FoodEntry.user_id == user_id)
+            .where(FoodEntry.created_at >= day_start_utc)
+            .order_by(FoodEntry.created_at)
+        )
+        entries = result.scalars().all()
+
+        if not entries:
+            return {
+                "success": True,
+                "data": {"entries": [], "total_calories": 0},
+                "message": "Записей еды за сегодня нет"
+            }
+
+        entries_list = []
+        total_calories = 0
+        for i, entry in enumerate(entries, 1):
+            entries_list.append({
+                "number": i,
+                "id": entry.id,
+                "description": entry.description,
+                "calories": entry.calories,
+                "protein": entry.protein,
+                "carbs": entry.carbs,
+                "fat": entry.fat,
+                "time": entry.created_at.strftime("%H:%M")
+            })
+            total_calories += entry.calories or 0
+
+        return {
+            "success": True,
+            "data": {"entries": entries_list, "total_calories": total_calories},
+            "message": f"Найдено {len(entries)} записей, всего {total_calories} ккал"
+        }
+
+
+async def _delete_food_entry(user_id: int, data: dict) -> dict:
+    """Удалить запись еды"""
+    entry_number = data.get("entry_number")
+    description_match = data.get("description_match", "").lower()
+
+    async with async_session() as session:
+        user_result = await session.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+
+        try:
+            tz = ZoneInfo(user.timezone if user else "Europe/Moscow")
+        except Exception:
+            tz = ZoneInfo("Europe/Moscow")
+
+        now_local = datetime.now(tz)
+        day_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start_utc = day_start.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+        result = await session.execute(
+            select(FoodEntry)
+            .where(FoodEntry.user_id == user_id)
+            .where(FoodEntry.created_at >= day_start_utc)
+            .order_by(FoodEntry.created_at)
+        )
+        entries = result.scalars().all()
+
+        entry_to_delete = None
+
+        if entry_number and 1 <= entry_number <= len(entries):
+            entry_to_delete = entries[entry_number - 1]
+        elif description_match:
+            for entry in entries:
+                if description_match in (entry.description or "").lower():
+                    entry_to_delete = entry
+                    break
+
+        if not entry_to_delete:
+            return {
+                "success": False,
+                "message": f"Запись не найдена. Всего записей: {len(entries)}"
+            }
+
+        description = entry_to_delete.description
+        calories = entry_to_delete.calories
+
+        await session.delete(entry_to_delete)
+        await session.commit()
+
+        logger.info(f"[FOOD] user={user_id} | Deleted: {description} ({calories} ккал)")
+
+        return {
+            "success": True,
+            "data": {"deleted": description, "calories": calories},
+            "message": f"Удалено: {description} ({calories} ккал)"
+        }
+
+
+async def _update_food_entry(user_id: int, data: dict) -> dict:
+    """Изменить запись еды"""
+    entry_number = data.get("entry_number")
+    description_match = data.get("description_match", "").lower()
+
+    async with async_session() as session:
+        user_result = await session.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+
+        try:
+            tz = ZoneInfo(user.timezone if user else "Europe/Moscow")
+        except Exception:
+            tz = ZoneInfo("Europe/Moscow")
+
+        now_local = datetime.now(tz)
+        day_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start_utc = day_start.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+        result = await session.execute(
+            select(FoodEntry)
+            .where(FoodEntry.user_id == user_id)
+            .where(FoodEntry.created_at >= day_start_utc)
+            .order_by(FoodEntry.created_at)
+        )
+        entries = result.scalars().all()
+
+        entry_to_update = None
+
+        if entry_number and 1 <= entry_number <= len(entries):
+            entry_to_update = entries[entry_number - 1]
+        elif description_match:
+            for entry in entries:
+                if description_match in (entry.description or "").lower():
+                    entry_to_update = entry
+                    break
+
+        if not entry_to_update:
+            return {
+                "success": False,
+                "message": f"Запись не найдена. Всего записей: {len(entries)}"
+            }
+
+        old_desc = entry_to_update.description
+        old_cal = entry_to_update.calories
+
+        # Обновляем только переданные поля
+        if data.get("new_description"):
+            entry_to_update.description = data["new_description"]
+        if data.get("new_calories") is not None:
+            entry_to_update.calories = data["new_calories"]
+        if data.get("new_protein") is not None:
+            entry_to_update.protein = data["new_protein"]
+        if data.get("new_carbs") is not None:
+            entry_to_update.carbs = data["new_carbs"]
+        if data.get("new_fat") is not None:
+            entry_to_update.fat = data["new_fat"]
+
+        await session.commit()
+
+        logger.info(f"[FOOD] user={user_id} | Updated: {old_desc} -> {entry_to_update.description}")
+
+        return {
+            "success": True,
+            "data": {
+                "old": {"description": old_desc, "calories": old_cal},
+                "new": {"description": entry_to_update.description, "calories": entry_to_update.calories}
+            },
+            "message": f"Обновлено: {entry_to_update.description} ({entry_to_update.calories} ккал)"
+        }
+
+
+async def _clear_today_food(user_id: int, data: dict) -> dict:
+    """Удалить все записи еды за сегодня"""
+    if not data.get("confirm"):
+        return {"success": False, "message": "Требуется подтверждение (confirm: true)"}
+
+    async with async_session() as session:
+        user_result = await session.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+
+        try:
+            tz = ZoneInfo(user.timezone if user else "Europe/Moscow")
+        except Exception:
+            tz = ZoneInfo("Europe/Moscow")
+
+        now_local = datetime.now(tz)
+        day_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start_utc = day_start.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+        count_result = await session.execute(
+            select(func.count(FoodEntry.id))
+            .where(FoodEntry.user_id == user_id)
+            .where(FoodEntry.created_at >= day_start_utc)
+        )
+        count = count_result.scalar_one() or 0
+
+        await session.execute(
+            delete(FoodEntry)
+            .where(FoodEntry.user_id == user_id)
+            .where(FoodEntry.created_at >= day_start_utc)
+        )
+        await session.commit()
+
+        logger.info(f"[FOOD] user={user_id} | Cleared {count} food entries")
+
+        return {
+            "success": True,
+            "data": {"deleted_count": count},
+            "message": f"Удалено {count} записей еды за сегодня"
         }
 
 
