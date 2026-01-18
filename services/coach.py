@@ -1132,15 +1132,39 @@ async def format_food_analysis(
         if micro.get("vitamin_info"):
             response += f"└ {micro.get('vitamin_info')}\n"
 
-    # Осталось на сегодня
-    calories_left = user_context.get("calorie_goal", 2000) - user_context.get("calories_today", 0)
-    protein_left = user_context.get("protein_goal", 100) - user_context.get("protein_today", 0)
-    water_left = user_context.get("water_goal", 2000) - user_context.get("water_today", 0)
+    # Статистика за день
+    calorie_goal = user_context.get("calorie_goal", 2000)
+    protein_goal = user_context.get("protein_goal", 100)
+    water_goal = user_context.get("water_goal", 2000)
 
-    response += f"\n📈 **Осталось на сегодня:**\n"
-    response += f"├ Калории: {max(0, calories_left)} / {user_context.get('calorie_goal', 2000)} ккал\n"
-    response += f"├ Белок: {max(0, protein_left)} / {user_context.get('protein_goal', 100)} г\n"
-    response += f"└ Вода: {max(0, water_left)} / {user_context.get('water_goal', 2000)} мл\n"
+    calories_eaten = user_context.get("calories_today", 0)
+    protein_eaten = user_context.get("protein_today", 0)
+    water_drunk = user_context.get("water_today", 0)
+
+    # Калории из этого приёма пищи
+    this_meal_cal = total.get("calories", 0)
+    this_meal_protein = total.get("protein", 0)
+
+    if saved:
+        # Уже записано - показываем итог
+        response += f"\n📈 **Итого за сегодня:**\n"
+        response += f"├ Калории: {calories_eaten} / {calorie_goal} ккал\n"
+        response += f"├ Белок: {protein_eaten} / {protein_goal} г\n"
+        response += f"└ Вода: {water_drunk} / {water_goal} мл\n"
+    else:
+        # Ещё не записано - показываем что будет после записи
+        new_calories = calories_eaten + this_meal_cal
+        new_protein = protein_eaten + this_meal_protein
+        calories_left = calorie_goal - new_calories
+
+        response += f"\n📈 **После записи будет:**\n"
+        response += f"├ Калории: {new_calories} / {calorie_goal} ккал"
+        if calories_left > 0:
+            response += f" (ещё {calories_left})\n"
+        else:
+            response += f" ⚠️ превышение на {abs(calories_left)}\n"
+        response += f"├ Белок: {new_protein} / {protein_goal} г\n"
+        response += f"└ Вода: {water_drunk} / {water_goal} мл\n"
 
     # Комментарий
     if food_data.get("health_notes"):
