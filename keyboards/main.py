@@ -74,6 +74,22 @@ def get_confirm_keyboard(action: str) -> InlineKeyboardMarkup:
     return keyboard
 
 
+def get_food_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения еды после анализа фото"""
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Записать", callback_data="food_confirm"),
+                InlineKeyboardButton(text="✏️ Исправить", callback_data="food_correct")
+            ],
+            [
+                InlineKeyboardButton(text="❌ Отмена", callback_data="food_cancel")
+            ]
+        ]
+    )
+    return keyboard
+
+
 def get_reminders_keyboard(user) -> InlineKeyboardMarkup:
     """Клавиатура настроек напоминаний"""
     water_status = "✅" if user.remind_water else "❌"

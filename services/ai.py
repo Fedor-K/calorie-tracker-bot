@@ -612,6 +612,92 @@ async def analyze_food_image(image_data: bytes, mime_type: str = "image/jpeg") -
         }
 
 
+async def correct_food_analysis(original_data: dict, correction_text: str) -> dict:
+    """
+    Корректирует анализ еды на основе уточнения пользователя
+
+    Args:
+        original_data: Оригинальные данные анализа
+        correction_text: Текст уточнения от пользователя
+
+    Returns:
+        Скорректированный словарь с информацией о еде
+    """
+    prompt = f"""Пользователь отправил фото еды, я его проанализировал.
+Теперь пользователь даёт уточнение. Скорректируй данные.
+
+ОРИГИНАЛЬНЫЙ АНАЛИЗ:
+{json.dumps(original_data, ensure_ascii=False, indent=2)}
+
+УТОЧНЕНИЕ ПОЛЬЗОВАТЕЛЯ: {correction_text}
+
+Верни ОБНОВЛЁННЫЙ JSON с учётом уточнения. Формат такой же:
+{{
+    "type": "food",
+    "description": "обновлённое описание",
+    "total": {{
+        "calories": число,
+        "protein": число,
+        "carbs": число,
+        "fat": число,
+        "fiber": число
+    }},
+    "meal_type": "breakfast/lunch/dinner/snack",
+    "health_notes": "обновлённый комментарий"
+}}
+
+ВАЖНО:
+- Если пользователь говорит что чего-то нет (например "без сметаны") - убери это из расчёта
+- Если пользователь уточняет напиток - добавь его калории
+- Пересчитай КБЖУ с учётом изменений
+- Сохрани остальные данные из оригинала если они не затронуты
+
+Ответь ТОЛЬКО JSON, без markdown."""
+
+    payload = {
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 1500,
+        "messages": [{"role": "user", "content": prompt}]
+    }
+
+    headers = {
+        "x-api-key": config.CLAUDE_API_KEY,
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01"
+    }
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            json=payload,
+            headers=headers
+        )
+        response.raise_for_status()
+        result = response.json()
+
+    content = result["content"][0]["text"]
+
+    try:
+        content = content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+
+        corrected = json.loads(content)
+        # Сохраняем тип
+        corrected["type"] = "food"
+        return corrected
+
+    except json.JSONDecodeError:
+        logger.error(f"[AI] Failed to parse corrected food: {content[:200]}")
+        # Возвращаем оригинал если не удалось распарсить
+        return original_data
+
+
 # ============================================================================
 # Вспомогательные функции для Z.AI (fallback)
 # ============================================================================

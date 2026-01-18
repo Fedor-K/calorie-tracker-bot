@@ -701,18 +701,20 @@ async def handle_message(user_id: int, message_text: str) -> str:
     return response_text
 
 
-async def handle_photo_message(
+async def format_food_analysis(
     user_id: int,
     food_data: dict,
-    user_context: Optional[dict] = None
+    user_context: Optional[dict] = None,
+    saved: bool = False
 ) -> str:
     """
-    Формирует красивый ответ для фото еды
+    Формирует красивый ответ для фото еды БЕЗ сохранения
 
     Args:
         user_id: ID пользователя
         food_data: Результат анализа от AI
         user_context: Контекст (опционально, загрузится автоматически)
+        saved: Показывать что уже сохранено
 
     Returns:
         Форматированный текст ответа
@@ -723,27 +725,11 @@ async def handle_photo_message(
     total = food_data.get("total", {})
     description = food_data.get("description", "Анализ еды")
 
-    # Сохраняем в базу
-    async with async_session() as session:
-        food_entry = FoodEntry(
-            user_id=user_id,
-            description=description,
-            meal_type=food_data.get("meal_type"),
-            calories=total.get("calories", 0),
-            protein=total.get("protein", 0),
-            carbs=total.get("carbs", 0),
-            fat=total.get("fat", 0),
-            fiber=total.get("fiber", 0),
-            ai_raw_response=json.dumps(food_data, ensure_ascii=False)
-        )
-        session.add(food_entry)
-        await session.commit()
-
-    # Обновляем контекст после записи
-    user_context = await get_user_context(user_id)
-
     # Формируем ответ
-    response = f"📸 Анализ вашего приёма пищи\n\n"
+    if saved:
+        response = f"✅ **Записано!**\n\n"
+    else:
+        response = f"📸 **Анализ фото**\n\n"
     response += f"🍽 **{description}**\n\n"
 
     response += "📊 **КБЖУ:**\n"
@@ -790,6 +776,58 @@ async def handle_photo_message(
             response += f"• {alt}\n"
 
     return response
+
+
+async def save_food_entry(user_id: int, food_data: dict) -> bool:
+    """
+    Сохраняет еду в базу данных
+
+    Args:
+        user_id: ID пользователя
+        food_data: Данные о еде от AI
+
+    Returns:
+        True если успешно сохранено
+    """
+    total = food_data.get("total", {})
+    description = food_data.get("description", "Еда")
+
+    async with async_session() as session:
+        food_entry = FoodEntry(
+            user_id=user_id,
+            description=description,
+            meal_type=food_data.get("meal_type"),
+            calories=total.get("calories", 0),
+            protein=total.get("protein", 0),
+            carbs=total.get("carbs", 0),
+            fat=total.get("fat", 0),
+            fiber=total.get("fiber", 0),
+            ai_raw_response=json.dumps(food_data, ensure_ascii=False)
+        )
+        session.add(food_entry)
+        await session.commit()
+
+    return True
+
+
+async def handle_photo_message(
+    user_id: int,
+    food_data: dict,
+    user_context: Optional[dict] = None
+) -> str:
+    """
+    Обрабатывает фото еды: сохраняет и возвращает ответ
+
+    Для нового потока с подтверждением используйте:
+    - format_food_analysis() - только форматирование
+    - save_food_entry() - только сохранение
+    """
+    # Сохраняем
+    await save_food_entry(user_id, food_data)
+
+    # Обновляем контекст и форматируем
+    user_context = await get_user_context(user_id)
+    return await format_food_analysis(user_id, food_data, user_context, saved=True)
 
 
 async def handle_fitness_photo(user_id: int, fitness_data: dict) -> str:
