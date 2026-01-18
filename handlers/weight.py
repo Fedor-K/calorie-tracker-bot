@@ -89,9 +89,20 @@ async def cmd_weight(message: Message):
         await message.answer("⚖️ Укажи вес: /weight 75.5")
 
 
+MENU_BUTTONS = {
+    "📊 Статистика", "💧 Вода", "⚖️ Вес", "🏃 Активность",
+    "🍽 План питания", "⚙️ Настройки"
+}
+
+
 @router.message(WeightStates.waiting_for_weight)
 async def process_weight_input(message: Message, state: FSMContext):
     """Обработка ввода веса в состоянии ожидания"""
+    # Пропускаем команды и кнопки меню
+    if message.text.startswith("/") or message.text in MENU_BUTTONS:
+        await state.clear()
+        return
+
     try:
         weight = float(message.text.replace(",", "."))
         if weight < 20 or weight > 300:

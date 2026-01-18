@@ -1,5 +1,8 @@
 from database.db import get_session, init_db
-from database.models import User, FoodEntry, WeightEntry, WaterEntry, ActivityEntry
+from database.models import (
+    User, FoodEntry, WeightEntry, WaterEntry, ActivityEntry,
+    ConversationMessage, UserMemory
+)
 
 __all__ = [
     "get_session",
@@ -8,5 +11,7 @@ __all__ = [
     "FoodEntry",
     "WeightEntry",
     "WaterEntry",
-    "ActivityEntry"
+    "ActivityEntry",
+    "ConversationMessage",
+    "UserMemory"
 ]

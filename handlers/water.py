@@ -130,3 +130,59 @@ async def handle_water_callback(callback: CallbackQuery):
     )
 
     await callback.answer(f"+{amount} мл")
+
+
+@router.callback_query(F.data.startswith("remind_water_"))
+async def handle_remind_water_callback(callback: CallbackQuery):
+    """Обработка кнопок из напоминания о воде"""
+    user_id = callback.from_user.id
+    action = callback.data.replace("remind_water_", "")
+
+    if action == "later":
+        await callback.message.edit_text(
+            "⏰ Хорошо, напомню позже!\n\n"
+            "Не забывай пить воду 💧"
+        )
+        await callback.answer("Напомню позже")
+        return
+
+    # Это количество воды
+    amount = int(action)
+    total, goal = await add_water(user_id, amount)
+    progress = min(100, int(total / goal * 100))
+    bar = "█" * (progress // 10) + "░" * (10 - progress // 10)
+
+    # Проверяем достижение цели
+    achievement = ""
+    if total >= goal and (total - amount) < goal:
+        achievement = "\n\n🎉 **Цель по воде достигнута!**"
+
+    await callback.message.edit_text(
+        f"✅ Отлично! +{amount} мл записано\n\n"
+        f"💧 Всего: **{total}** / {goal} мл\n"
+        f"[{bar}] {progress}%{achievement}",
+        parse_mode="Markdown"
+    )
+    await callback.answer(f"+{amount} мл 👍")
+
+
+@router.callback_query(F.data.startswith("sleep_"))
+async def handle_sleep_callback(callback: CallbackQuery):
+    """Обработка кнопок из напоминания о сне"""
+    action = callback.data.replace("sleep_", "")
+
+    if action == "going":
+        await callback.message.edit_text(
+            "😴 **Спокойной ночи!**\n\n"
+            "Хорошего отдыха! Увидимся завтра 🌅",
+            parse_mode="Markdown"
+        )
+        await callback.answer("Спокойной ночи! 🌙")
+    elif action == "later":
+        await callback.message.edit_text(
+            "⏰ Хорошо, ещё 30 минут!\n\n"
+            "Но не засиживайся допоздна 😉\n"
+            "Здоровый сон = здоровое тело 💪",
+            parse_mode="Markdown"
+        )
+        await callback.answer("Не забудь лечь спать!")

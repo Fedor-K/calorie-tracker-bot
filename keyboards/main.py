@@ -7,16 +7,15 @@ from aiogram.types import (
 
 
 def get_main_keyboard() -> ReplyKeyboardMarkup:
-    """Главная клавиатура бота"""
+    """
+    Упрощённая главная клавиатура бота
+    Основные быстрые действия + AI коуч для остального
+    """
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [
                 KeyboardButton(text="📊 Статистика"),
                 KeyboardButton(text="💧 Вода")
-            ],
-            [
-                KeyboardButton(text="⚖️ Вес"),
-                KeyboardButton(text="🏃 Активность")
             ],
             [
                 KeyboardButton(text="🍽 План питания"),

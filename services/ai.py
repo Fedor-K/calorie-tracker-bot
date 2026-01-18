@@ -1,15 +1,481 @@
+"""
+AI Coach Service
+Использует Claude API с tool calling для интеллектуального трекинга здоровья
+"""
 import json
 import base64
 import httpx
+import logging
 from typing import Optional
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import config
 
-FOOD_ANALYSIS_PROMPT = """Ты — эксперт-диетолог. Проанализируй фото еды и верни JSON с информацией.
+logger = logging.getLogger(__name__)
 
-ВАЖНО: Отвечай ТОЛЬКО валидным JSON без markdown и пояснений.
+# ============================================================================
+# COACH TOOLS - инструменты для AI
+# ============================================================================
 
-Формат ответа:
+COACH_TOOLS = [
+    {
+        "name": "log_food",
+        "description": "Записать приём пищи. Используй когда пользователь говорит что съел.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "description": {"type": "string", "description": "Что съел (название блюда)"},
+                "calories": {"type": "integer", "description": "Калории"},
+                "protein": {"type": "number", "description": "Белки в граммах"},
+                "carbs": {"type": "number", "description": "Углеводы в граммах"},
+                "fat": {"type": "number", "description": "Жиры в граммах"},
+                "fiber": {"type": "number", "description": "Клетчатка в граммах"},
+                "meal_type": {
+                    "type": "string",
+                    "enum": ["breakfast", "lunch", "dinner", "snack"],
+                    "description": "Тип приёма пищи"
+                }
+            },
+            "required": ["description", "calories"]
+        }
+    },
+    {
+        "name": "log_water",
+        "description": "Записать воду. Используй когда пользователь говорит что выпил воду/чай/кофе/напиток.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "amount_ml": {"type": "integer", "description": "Количество в мл"}
+            },
+            "required": ["amount_ml"]
+        }
+    },
+    {
+        "name": "log_weight",
+        "description": "Записать вес пользователя.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "weight_kg": {"type": "number", "description": "Вес в килограммах"}
+            },
+            "required": ["weight_kg"]
+        }
+    },
+    {
+        "name": "log_activity",
+        "description": "Записать активность/тренировку.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "activity_type": {"type": "string", "description": "Тип активности (бег, ходьба, тренировка и т.д.)"},
+                "duration_minutes": {"type": "integer", "description": "Длительность в минутах"},
+                "calories_burned": {"type": "integer", "description": "Сожжённые калории (если известно)"}
+            },
+            "required": ["activity_type", "duration_minutes"]
+        }
+    },
+    {
+        "name": "get_today_stats",
+        "description": "Получить статистику за сегодня. Используй когда нужно узнать сколько съедено/выпито.",
+        "input_schema": {
+            "type": "object",
+            "properties": {}
+        }
+    },
+    {
+        "name": "get_weight_history",
+        "description": "Получить историю веса за последние N дней.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "description": "Количество дней", "default": 7}
+            }
+        }
+    },
+    {
+        "name": "remember_fact",
+        "description": "Запомнить важный факт о пользователе (привычка, предпочтение, ограничение в питании, цель).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": ["preference", "habit", "restriction", "goal", "fact"],
+                    "description": "Категория: preference (предпочтение), habit (привычка), restriction (ограничение), goal (цель), fact (факт)"
+                },
+                "content": {"type": "string", "description": "Текст факта (например: 'не ест молочку', 'вегетарианец')"}
+            },
+            "required": ["category", "content"]
+        }
+    },
+    {
+        "name": "update_profile",
+        "description": "Обновить профиль пользователя (имя, возраст, рост, вес, цель и т.д.)",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "first_name": {"type": "string", "description": "Имя пользователя"},
+                "age": {"type": "integer", "description": "Возраст"},
+                "gender": {"type": "string", "enum": ["male", "female"], "description": "Пол"},
+                "height_cm": {"type": "integer", "description": "Рост в сантиметрах"},
+                "current_weight_kg": {"type": "number", "description": "Текущий вес"},
+                "target_weight_kg": {"type": "number", "description": "Целевой вес"},
+                "calorie_goal": {"type": "integer", "description": "Цель по калориям"},
+                "water_goal": {"type": "integer", "description": "Цель по воде в мл"},
+                "goal": {
+                    "type": "string",
+                    "enum": ["lose", "gain", "maintain", "health"],
+                    "description": "Цель: lose (похудеть), gain (набрать), maintain (поддерживать), health (здоровье)"
+                }
+            }
+        }
+    },
+    {
+        "name": "check_profile_complete",
+        "description": "Проверить, заполнен ли профиль пользователя (есть ли рост/вес для расчётов)",
+        "input_schema": {
+            "type": "object",
+            "properties": {}
+        }
+    },
+    {
+        "name": "get_today_activities",
+        "description": "Получить список активностей за сегодня. Используй чтобы узнать что уже записано.",
+        "input_schema": {
+            "type": "object",
+            "properties": {}
+        }
+    },
+    {
+        "name": "update_daily_activity",
+        "description": "Обновить или установить дневную активность (сожжённые калории). Используй когда пользователь хочет исправить калории активности или указывает что данные неверные.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "calories_burned": {"type": "integer", "description": "Правильное количество сожжённых калорий"},
+                "activity_type": {"type": "string", "description": "Тип активности (ходьба, бег, тренировка)"},
+                "reason": {"type": "string", "description": "Почему меняем (например: 'пользователь указал на ошибку')"}
+            },
+            "required": ["calories_burned"]
+        }
+    },
+    {
+        "name": "clear_today_activities",
+        "description": "Удалить все активности за сегодня. Используй если пользователь говорит что данные неверные и нужно сбросить.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "confirm": {"type": "boolean", "description": "Подтверждение удаления"}
+            },
+            "required": ["confirm"]
+        }
+    }
+]
+
+
+# ============================================================================
+# SYSTEM PROMPT для AI коуча
+# ============================================================================
+
+def get_system_prompt(user_context: dict, memories_text: str) -> str:
+    """Генерирует системный промпт для AI коуча"""
+
+    goal_text = {
+        "lose": "похудение",
+        "gain": "набор мышечной массы",
+        "maintain": "поддержание веса",
+        "health": "здоровый образ жизни"
+    }.get(user_context.get("goal", "health"), "здоровье")
+
+    # Формируем список еды за сегодня
+    meals_today = user_context.get("meals_today", [])
+    meals_text = "\n".join([f"  - {m}" for m in meals_today]) if meals_today else "  Ничего не записано"
+
+    # Формируем список активностей за сегодня
+    activities_today = user_context.get("activities_today", [])
+    activities_text = "\n".join([f"  - {a}" for a in activities_today]) if activities_today else "  Ничего не записано"
+
+    profile_complete = user_context.get("profile_complete", False)
+
+    system = f"""Ты — персональный AI-коуч по здоровью и питанию.
+
+ТВОЯ ФИЛОСОФИЯ (ОЧЕНЬ ВАЖНО!):
+Цель — НЕ заставить человека силой воли сбросить вес, чтобы потом набрать обратно.
+Цель — бережно помочь выработать правильные привычки, чтобы вес ушёл НАВСЕГДА.
+
+Принципы:
+- Маленькие шаги > резкие перемены
+- Замена привычек > запреты (греческий йогурт вместо сметаны, а не "нельзя сметану")
+- Понимание "почему" > слепое следование правилам
+- Гибкость > жёсткие диеты (съел пиццу — не трагедия, завтра продолжим)
+- Долгосрочное мышление > быстрые результаты
+
+ТВОИ ВОЗМОЖНОСТИ:
+- Записывать еду, воду, вес, активность через инструменты
+- Отвечать на вопросы о питании и здоровье
+- Запоминать предпочтения и ограничения пользователя
+- Предлагать ЗОЖ-альтернативы вместо запретов
+
+ПРАВИЛА ОБЩЕНИЯ:
+1. Пиши кратко и по делу (2-4 предложения обычно достаточно)
+2. Используй эмодзи умеренно
+3. Будь поддерживающим, не осуждай за "срывы" — это часть пути
+4. Предлагай альтернативы, а не запрещай (вместо "не ешь сладкое" → "попробуй тёмный шоколад или фрукты")
+5. Учитывай контекст: что уже съедено, память о пользователе
+6. Если пользователь сообщает о еде — ВСЕГДА используй инструмент log_food
+7. Если пользователь говорит о воде/напитке — используй log_water
+8. Если узнаёшь новый факт о пользователе (ограничение, предпочтение) — используй remember_fact
+9. Хвали за хорошие выборы, мягко предлагай улучшения для не очень хороших
+10. Отвечай на русском языке
+
+ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ:
+- Имя: {user_context.get('name', 'Пользователь')}
+- Страна: {user_context.get('country', 'Россия')}
+- Возраст: {user_context.get('age') or '?'} лет
+- Пол: {'мужской' if user_context.get('gender') == 'male' else 'женский' if user_context.get('gender') == 'female' else '?'}
+- Рост: {user_context.get('height') or '?'} см
+- Текущий вес: {user_context.get('weight') or '?'} кг
+- Целевой вес: {user_context.get('target_weight') or '?'} кг
+- Цель: {goal_text}
+- Профиль заполнен: {'да' if profile_complete else 'нет (нужно собрать данные)'}
+
+ДНЕВНЫЕ ЦЕЛИ:
+- Калории: {user_context.get('calorie_goal', 2000)} ккал
+- Вода: {user_context.get('water_goal', 2000)} мл
+- Белок: {user_context.get('protein_goal', 100)} г
+
+СЕГОДНЯ:
+- Съедено калорий: {user_context.get('calories_today') or 0} ккал
+- Сожжено калорий: {user_context.get('calories_burned_today') or 0} ккал
+- Нетто калорий: {(user_context.get('calories_today') or 0) - (user_context.get('calories_burned_today') or 0)} ккал
+- Выпито воды: {user_context.get('water_today', 0)} мл
+- Белка: {user_context.get('protein_today', 0)} г
+- Что ел:
+{meals_text}
+- Активности:
+{activities_text}
+
+ВАЖНО ПРО АКТИВНОСТИ:
+- Если пользователь спрашивает почему калории не так или хочет исправить — используй update_daily_activity
+- Не создавай новые записи активности если уже есть запись за сегодня — обновляй существующую
+- Фото часов обновляет дневную активность автоматически
+"""
+
+    if memories_text:
+        system += f"""
+ПАМЯТЬ О ПОЛЬЗОВАТЕЛЕ:
+{memories_text}
+"""
+
+    if not profile_complete:
+        system += """
+ВАЖНО: Профиль пользователя не заполнен. В начале разговора постарайся естественно узнать:
+- Имя (если не знаешь)
+- Рост и вес (для расчёта калорий)
+- Цель (похудеть/набрать/поддерживать)
+Не спрашивай всё сразу, веди естественный диалог.
+"""
+
+    return system
+
+
+# ============================================================================
+# Главная функция обработки сообщений
+# ============================================================================
+
+async def process_message(
+    user_id: int,
+    message: str,
+    user_context: dict,
+    memories_text: str = "",
+    conversation: list[dict] = None
+) -> dict:
+    """
+    Обработать сообщение пользователя через AI с инструментами
+
+    Args:
+        user_id: ID пользователя
+        message: Текст сообщения
+        user_context: Контекст пользователя (профиль, статистика)
+        memories_text: Текст с памятью о пользователе
+        conversation: История диалога [{"role": "user/assistant", "content": "..."}]
+
+    Returns:
+        {
+            "response": "текст ответа пользователю",
+            "tool_calls": [{"name": "...", "input": {...}, "result": {...}}, ...]
+        }
+    """
+    if conversation is None:
+        conversation = []
+
+    system_prompt = get_system_prompt(user_context, memories_text)
+
+    # Формируем сообщения для API
+    messages = conversation.copy()
+    messages.append({"role": "user", "content": message})
+
+    payload = {
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 2000,
+        "system": system_prompt,
+        "messages": messages,
+        "tools": COACH_TOOLS
+    }
+
+    headers = {
+        "x-api-key": config.CLAUDE_API_KEY,
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01"
+    }
+
+    tool_calls = []
+    final_response = ""
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        # Первый вызов API
+        response = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            json=payload,
+            headers=headers
+        )
+        if response.status_code != 200:
+            error_text = response.text
+            logger.error(f"[AI] API Error {response.status_code}: {error_text}")
+            raise Exception(f"API Error: {error_text}")
+        result = response.json()
+
+        # Обрабатываем ответ и возможные tool_use
+        while True:
+            stop_reason = result.get("stop_reason")
+            content_blocks = result.get("content", [])
+
+            # Собираем текстовые блоки
+            text_parts = []
+            tool_use_blocks = []
+
+            for block in content_blocks:
+                if block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+                elif block.get("type") == "tool_use":
+                    tool_use_blocks.append(block)
+
+            # Если есть текст — добавляем к ответу
+            if text_parts:
+                final_response += "".join(text_parts)
+
+            # Если нет tool_use — выходим
+            if stop_reason != "tool_use" or not tool_use_blocks:
+                break
+
+            # Обрабатываем tool_use
+            tool_results = []
+            for tool_block in tool_use_blocks:
+                tool_name = tool_block.get("name")
+                tool_id = tool_block.get("id")
+                tool_input = tool_block.get("input", {})
+
+                logger.info(f"[AI] Tool call: {tool_name} | input: {tool_input}")
+
+                # Выполняем инструмент (фактическое выполнение будет в coach.py)
+                # Здесь только сохраняем информацию о вызове
+                tool_calls.append({
+                    "name": tool_name,
+                    "input": tool_input,
+                    "id": tool_id
+                })
+
+                # Формируем результат для Claude (будет заполнен в coach.py)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": json.dumps({"status": "pending"})
+                })
+
+            # Если есть tool calls — выходим из цикла, результаты обработает coach.py
+            break
+
+    return {
+        "response": final_response.strip(),
+        "tool_calls": tool_calls
+    }
+
+
+async def process_message_with_tool_results(
+    user_id: int,
+    original_message: str,
+    user_context: dict,
+    memories_text: str,
+    conversation: list[dict],
+    assistant_content: list[dict],
+    tool_results: list[dict]
+) -> str:
+    """
+    Продолжить обработку после выполнения инструментов
+
+    Args:
+        assistant_content: Контент от ассистента (включая tool_use блоки)
+        tool_results: Результаты выполнения инструментов
+
+    Returns:
+        Финальный текстовый ответ
+    """
+    system_prompt = get_system_prompt(user_context, memories_text)
+
+    # Формируем сообщения с результатами инструментов
+    messages = conversation.copy()
+    messages.append({"role": "user", "content": original_message})
+    messages.append({"role": "assistant", "content": assistant_content})
+    messages.append({"role": "user", "content": tool_results})
+
+    payload = {
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 2000,
+        "system": system_prompt,
+        "messages": messages,
+        "tools": COACH_TOOLS
+    }
+
+    headers = {
+        "x-api-key": config.CLAUDE_API_KEY,
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01"
+    }
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            json=payload,
+            headers=headers
+        )
+        response.raise_for_status()
+        result = response.json()
+
+    # Собираем текстовый ответ
+    content_blocks = result.get("content", [])
+    text_parts = []
+
+    for block in content_blocks:
+        if block.get("type") == "text":
+            text_parts.append(block.get("text", ""))
+
+    return "".join(text_parts).strip()
+
+
+# ============================================================================
+# Анализ фото (еда или фитнес-трекер)
+# ============================================================================
+
+PHOTO_ANALYSIS_PROMPT = """Проанализируй фото. Это может быть ЕДА или СКРИНШОТ ФИТНЕС-ТРЕКЕРА (Apple Watch, Mi Band, Samsung Health и т.д.)
+
+ВАЖНО: Отвечай ТОЛЬКО валидным JSON без markdown.
+
+СНАЧАЛА определи тип фото и верни соответствующий JSON:
+
+===== ЕСЛИ ЭТО ЕДА =====
 {
+    "type": "food",
     "description": "Краткое описание блюда на русском",
     "items": [
         {
@@ -29,65 +495,97 @@ FOOD_ANALYSIS_PROMPT = """Ты — эксперт-диетолог. Проана
         "fiber": клетчатка в граммах
     },
     "meal_type": "breakfast" | "lunch" | "dinner" | "snack",
-    "health_notes": "краткий комментарий о полезности блюда"
+    "health_notes": "краткий комментарий о полезности блюда",
+    "health_score": число от 1 до 10,
+    "healthy_alternatives": ["альтернатива 1", "альтернатива 2"]
 }
 
-Оценивай порции реалистично по размеру на фото. Если не уверен — давай средние значения."""
+===== ЕСЛИ ЭТО ФИТНЕС-ТРЕКЕР / УМНЫЕ ЧАСЫ =====
+{
+    "type": "fitness",
+    "device": "Apple Watch" | "Mi Band" | "Samsung" | "Garmin" | "другое",
+    "activity_data": {
+        "steps": число шагов (если видно),
+        "calories_burned": сожжённые калории (если видно),
+        "active_minutes": минуты активности (если видно),
+        "distance_km": дистанция в км (если видно),
+        "heart_rate": пульс (если видно),
+        "floors": этажи (если видно),
+        "workout_type": "тип тренировки если видно (бег, ходьба и т.д.)",
+        "workout_duration_min": длительность тренировки в минутах (если видно)
+    },
+    "summary": "Краткое описание что видно на экране"
+}
+
+===== ЕСЛИ ЭТО ЧТО-ТО ДРУГОЕ =====
+{
+    "type": "other",
+    "description": "Описание что на фото"
+}
+
+ВАЖНО:
+- Для еды: если health_score < 6, предложи ЗОЖ-альтернативы
+- Для фитнеса: извлеки ВСЕ числовые данные что видишь на экране
+- Числа пиши без единиц измерения (просто числа)
+- Для еды: оценивай порции реалистично по размеру на фото"""
 
 
 async def analyze_food_image(image_data: bytes, mime_type: str = "image/jpeg") -> dict:
     """
-    Анализирует фото еды через Z.AI Vision API
+    Анализирует фото через Claude Vision API
+    Может распознавать еду И фитнес-трекеры
 
     Args:
         image_data: Бинарные данные изображения
         mime_type: MIME тип изображения
 
     Returns:
-        Словарь с информацией о еде и калориях
+        Словарь с информацией (type: food/fitness/other)
     """
     base64_image = base64.b64encode(image_data).decode("utf-8")
 
     payload = {
-        "model": config.ZAI_MODEL,
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 1500,
         "messages": [
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": FOOD_ANALYSIS_PROMPT},
                     {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{mime_type};base64,{base64_image}"
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": mime_type,
+                            "data": base64_image
                         }
+                    },
+                    {
+                        "type": "text",
+                        "text": PHOTO_ANALYSIS_PROMPT
                     }
                 ]
             }
-        ],
-        "max_tokens": 1000,
-        "temperature": 0.3
+        ]
     }
 
     headers = {
-        "Authorization": f"Bearer {config.ZAI_API_KEY}",
-        "Content-Type": "application/json"
+        "x-api-key": config.CLAUDE_API_KEY,
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01"
     }
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
-            config.ZAI_API_URL,
+            "https://api.anthropic.com/v1/messages",
             json=payload,
             headers=headers
         )
         response.raise_for_status()
         result = response.json()
 
-    # Извлекаем текст ответа
-    content = result["choices"][0]["message"]["content"]
+    content = result["content"][0]["text"]
 
-    # Парсим JSON из ответа
     try:
-        # Убираем возможные markdown блоки
         content = content.strip()
         if content.startswith("```json"):
             content = content[7:]
@@ -99,7 +597,6 @@ async def analyze_food_image(image_data: bytes, mime_type: str = "image/jpeg") -
 
         return json.loads(content)
     except json.JSONDecodeError:
-        # Если не удалось распарсить, возвращаем базовую структуру
         return {
             "description": content[:200],
             "total": {
@@ -114,6 +611,10 @@ async def analyze_food_image(image_data: bytes, mime_type: str = "image/jpeg") -
             "raw_response": content
         }
 
+
+# ============================================================================
+# Вспомогательные функции для Z.AI (fallback)
+# ============================================================================
 
 async def estimate_activity_calories(activity: str, duration_minutes: int, weight_kg: float = 70) -> dict:
     """
@@ -133,41 +634,43 @@ async def estimate_activity_calories(activity: str, duration_minutes: int, weigh
     "notes": "краткий комментарий"
 }}"""
 
-    payload = {
-        "model": config.ZAI_MODEL.replace("-Flash", ""),  # Используем не-vision модель
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 300,
-        "temperature": 0.3
-    }
-
-    headers = {
-        "Authorization": f"Bearer {config.ZAI_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            config.ZAI_API_URL,
-            json=payload,
-            headers=headers
-        )
-        response.raise_for_status()
-        result = response.json()
-
-    content = result["choices"][0]["message"]["content"]
-
+    # Сначала пытаемся через Claude
     try:
+        payload = {
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 300,
+            "messages": [{"role": "user", "content": prompt}]
+        }
+
+        headers = {
+            "x-api-key": config.CLAUDE_API_KEY,
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01"
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                json=payload,
+                headers=headers
+            )
+            response.raise_for_status()
+            result = response.json()
+
+        content = result["content"][0]["text"]
         content = content.strip()
         if content.startswith("```"):
             content = content.split("```")[1]
             if content.startswith("json"):
                 content = content[4:]
         return json.loads(content.strip())
-    except:
-        # Фолбэк на примерные расчёты
+
+    except Exception:
+        # Фолбэк на расчёт по MET
         met_values = {
             "ходьба": 3.5, "бег": 8.0, "плавание": 6.0,
-            "велосипед": 5.0, "тренировка": 5.0, "йога": 2.5
+            "велосипед": 5.0, "тренировка": 5.0, "йога": 2.5,
+            "фитнес": 5.5, "танцы": 4.5
         }
         activity_lower = activity.lower()
         met = 4.0  # default
@@ -204,24 +707,24 @@ async def generate_meal_plan(
 Пиши на русском языке, кратко и по делу."""
 
     payload = {
-        "model": config.ZAI_MODEL.replace("-Flash", "").replace("V", ""),
-        "messages": [{"role": "user", "content": prompt}],
+        "model": "claude-sonnet-4-20250514",
         "max_tokens": 1500,
-        "temperature": 0.7
+        "messages": [{"role": "user", "content": prompt}]
     }
 
     headers = {
-        "Authorization": f"Bearer {config.ZAI_API_KEY}",
-        "Content-Type": "application/json"
+        "x-api-key": config.CLAUDE_API_KEY,
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01"
     }
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
-            config.ZAI_API_URL,
+            "https://api.anthropic.com/v1/messages",
             json=payload,
             headers=headers
         )
         response.raise_for_status()
         result = response.json()
 
-    return result["choices"][0]["message"]["content"]
+    return result["content"][0]["text"]

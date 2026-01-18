@@ -18,6 +18,12 @@ class SettingsStates(StatesGroup):
     waiting_for_height = State()
 
 
+MENU_BUTTONS = {
+    "📊 Статистика", "💧 Вода", "⚖️ Вес", "🏃 Активность",
+    "🍽 План питания", "⚙️ Настройки"
+}
+
+
 @router.message(F.text == "⚙️ Настройки")
 async def handle_settings_button(message: Message):
     """Кнопка настроек"""
@@ -76,6 +82,10 @@ async def set_calories_callback(callback: CallbackQuery, state: FSMContext):
 @router.message(SettingsStates.waiting_for_calories)
 async def process_calories_input(message: Message, state: FSMContext):
     """Обработка ввода калорий"""
+    if message.text.startswith("/") or message.text in MENU_BUTTONS:
+        await state.clear()
+        return
+
     try:
         calories = int(message.text)
         if calories < 500 or calories > 10000:
@@ -113,6 +123,10 @@ async def set_water_callback(callback: CallbackQuery, state: FSMContext):
 @router.message(SettingsStates.waiting_for_water)
 async def process_water_input(message: Message, state: FSMContext):
     """Обработка ввода воды"""
+    if message.text.startswith("/") or message.text in MENU_BUTTONS:
+        await state.clear()
+        return
+
     try:
         water = int(message.text)
         if water < 500 or water > 10000:
@@ -150,6 +164,10 @@ async def set_target_weight_callback(callback: CallbackQuery, state: FSMContext)
 @router.message(SettingsStates.waiting_for_target_weight)
 async def process_target_weight_input(message: Message, state: FSMContext):
     """Обработка ввода целевого веса"""
+    if message.text.startswith("/") or message.text in MENU_BUTTONS:
+        await state.clear()
+        return
+
     try:
         weight = float(message.text.replace(",", "."))
         if weight < 30 or weight > 300:
@@ -187,6 +205,10 @@ async def set_height_callback(callback: CallbackQuery, state: FSMContext):
 @router.message(SettingsStates.waiting_for_height)
 async def process_height_input(message: Message, state: FSMContext):
     """Обработка ввода роста"""
+    if message.text.startswith("/") or message.text in MENU_BUTTONS:
+        await state.clear()
+        return
+
     try:
         height = int(message.text)
         if height < 100 or height > 250:

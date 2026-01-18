@@ -26,8 +26,8 @@ async def main():
         logger.error("TELEGRAM_BOT_TOKEN не установлен!")
         return
 
-    if not config.ZAI_API_KEY:
-        logger.error("ZAI_API_KEY не установлен!")
+    if not config.CLAUDE_API_KEY and not config.ZAI_API_KEY:
+        logger.error("CLAUDE_API_KEY или ZAI_API_KEY не установлен!")
         return
 
     if not config.DATABASE_URL:

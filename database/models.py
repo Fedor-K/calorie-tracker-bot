@@ -23,12 +23,18 @@ class User(Base):
     current_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     target_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)  # см
+    age: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gender: Mapped[str | None] = mapped_column(String(10), nullable=True)  # male/female
+    goal: Mapped[str | None] = mapped_column(String(20), nullable=True)  # lose/gain/maintain/health
+
+    # Локация и настройки
+    country: Mapped[str | None] = mapped_column(String(100), nullable=True)  # Страна для рекомендаций
+    timezone: Mapped[str] = mapped_column(String(50), default="Europe/Moscow")
 
     # Настройки напоминаний
     remind_water: Mapped[bool] = mapped_column(Boolean, default=True)
     remind_food: Mapped[bool] = mapped_column(Boolean, default=True)
     remind_weight: Mapped[bool] = mapped_column(Boolean, default=True)
-    timezone: Mapped[str] = mapped_column(String(50), default="Europe/Moscow")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -37,6 +43,8 @@ class User(Base):
     weight_entries: Mapped[list["WeightEntry"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     water_entries: Mapped[list["WaterEntry"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     activity_entries: Mapped[list["ActivityEntry"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    conversation_messages: Mapped[list["ConversationMessage"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    user_memories: Mapped[list["UserMemory"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class FoodEntry(Base):
@@ -106,3 +114,30 @@ class ActivityEntry(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     user: Mapped["User"] = relationship(back_populates="activity_entries")
+
+
+class ConversationMessage(Base):
+    """История диалога с AI коучем"""
+    __tablename__ = "conversation_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
+    role: Mapped[str] = mapped_column(String(20))  # "user" | "assistant"
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="conversation_messages")
+
+
+class UserMemory(Base):
+    """Долгосрочная память о пользователе"""
+    __tablename__ = "user_memories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
+    category: Mapped[str] = mapped_column(String(50))  # preference, habit, restriction, goal, fact
+    content: Mapped[str] = mapped_column(Text)  # "не ест молочку", "тренируется по утрам"
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="user_memories")

@@ -6,7 +6,10 @@ load_dotenv()
 # Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# Z.AI API
+# Claude API (Anthropic)
+CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
+
+# Z.AI API (fallback)
 ZAI_API_KEY = os.getenv("ZAI_API_KEY")
 ZAI_API_URL = os.getenv("ZAI_API_URL", "https://api.z.ai/api/paas/v4/chat/completions")
 ZAI_MODEL = os.getenv("ZAI_MODEL", "GLM-4.6V-Flash")
