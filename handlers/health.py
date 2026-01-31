@@ -175,7 +175,7 @@ async def cmd_sync(message: Message):
             key = key.strip().lower()
             try:
                 value = float(val.strip().replace(",", "."))
-            except:
+            except Exception:
                 continue
 
             if key in ["шаги", "steps"]:

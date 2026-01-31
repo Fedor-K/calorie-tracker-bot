@@ -4,7 +4,7 @@ Coach Service - Оркестрация AI коуча
 """
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 from sqlalchemy import select, func, delete
@@ -342,7 +342,7 @@ async def _get_today_stats(user_id: int) -> dict:
 async def _get_weight_history(user_id: int, data: dict) -> dict:
     """Получить историю веса"""
     days = data.get("days", 7)
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
     async with async_session() as session:
         result = await session.execute(
@@ -1398,39 +1398,75 @@ async def handle_fitness_photo(user_id: int, fitness_data: dict) -> str:
 
 async def handle_medical_photo(user_id: int, medical_data: dict) -> str:
     """
-    Обрабатывает фото медицинских анализов и сохраняет в память пользователя
+    Обрабатывает фото медицинских документов и сохраняет в память пользователя
+
+    Поддерживает: анализы, выписки, заключения врачей, справки, протоколы
 
     Args:
         user_id: ID пользователя
-        medical_data: Данные анализов от AI
+        medical_data: Данные от AI
 
     Returns:
         Форматированный текст ответа
     """
     logger.info(f"[MEDICAL] user={user_id} | AI response: {medical_data}")
 
-    analysis_type = medical_data.get("analysis_type", "анализы")
+    document_type = medical_data.get("document_type", "анализы")
+    analysis_type = medical_data.get("analysis_type", "")
     date = medical_data.get("date", "")
+    doctor = medical_data.get("doctor", "")
+    diagnosis = medical_data.get("diagnosis", "")
     indicators = medical_data.get("indicators", [])
+    findings = medical_data.get("findings", [])
+    recommendations_from_doc = medical_data.get("recommendations_from_doc", [])
     summary = medical_data.get("summary", "")
-    recommendations = medical_data.get("nutrition_recommendations", [])
+    nutrition_recommendations = medical_data.get("nutrition_recommendations", [])
     concerns = medical_data.get("concerns", [])
 
-    # Формируем заголовок
+    # Формируем заголовок в зависимости от типа документа
+    doc_emoji = {
+        "анализы": "🧪",
+        "выписка": "📋",
+        "заключение": "📝",
+        "справка": "📄",
+        "протокол": "📑",
+        "комплексное": "🏥"
+    }
     type_emoji = {
         "кровь": "🩸",
         "биохимия": "🧪",
         "моча": "💧",
-        "гормоны": "⚗️"
+        "гормоны": "⚗️",
+        "УЗИ": "📡",
+        "ЭКГ": "❤️",
+        "рентген": "☢️"
     }
-    emoji = type_emoji.get(analysis_type, "🔬")
 
-    response = f"{emoji} **Анализ: {analysis_type}**"
+    # Выбираем эмодзи
+    if document_type in ["выписка", "заключение", "справка", "протокол"]:
+        emoji = doc_emoji.get(document_type, "📋")
+        title = document_type.capitalize()
+        if analysis_type and analysis_type != "другое":
+            title += f" ({analysis_type})"
+    else:
+        emoji = type_emoji.get(analysis_type, doc_emoji.get(document_type, "🔬"))
+        title = f"Анализ: {analysis_type}" if analysis_type else "Медицинский документ"
+
+    response = f"{emoji} **{title}**"
     if date:
-        response += f" ({date})"
-    response += "\n\n"
+        response += f" от {date}"
+    response += "\n"
 
-    # Показываем показатели
+    # Врач и диагноз
+    if doctor:
+        response += f"👨‍⚕️ Врач: {doctor}\n"
+    if diagnosis:
+        response += f"🏷 Диагноз: **{diagnosis}**\n"
+
+    if doctor or diagnosis:
+        response += "\n"
+
+    # Показываем показатели (для анализов)
     if indicators:
         response += "📋 **Показатели:**\n"
         for i, ind in enumerate(indicators):
@@ -1442,9 +1478,9 @@ async def handle_medical_photo(user_id: int, medical_data: dict) -> str:
 
             # Иконка статуса
             if status == "high":
-                status_icon = "🔴 ↑"
+                status_icon = "🔴↑"
             elif status == "low":
-                status_icon = "🔵 ↓"
+                status_icon = "🔵↓"
             else:
                 status_icon = "✅"
 
@@ -1456,25 +1492,46 @@ async def handle_medical_photo(user_id: int, medical_data: dict) -> str:
             if ref_range and status != "normal":
                 line += f" (норма: {ref_range})"
             response += line + "\n"
+        response += "\n"
+
+    # Ключевые выводы (для выписок/заключений)
+    if findings:
+        response += "📌 **Ключевые выводы:**\n"
+        for finding in findings:
+            response += f"• {finding}\n"
+        response += "\n"
+
+    # Рекомендации врача (для выписок/заключений)
+    if recommendations_from_doc:
+        response += "👨‍⚕️ **Рекомендации врача:**\n"
+        for rec in recommendations_from_doc:
+            response += f"• {rec}\n"
+        response += "\n"
 
     # Проблемные показатели
     if concerns:
-        response += "\n⚠️ **Обратить внимание:**\n"
+        response += "⚠️ **Обратить внимание:**\n"
         for concern in concerns:
             response += f"• {concern}\n"
+        response += "\n"
 
-    # Рекомендации по питанию
-    if recommendations:
-        response += "\n🥗 **Рекомендации по питанию:**\n"
-        for rec in recommendations:
+    # Рекомендации по питанию (наши)
+    if nutrition_recommendations:
+        response += "🥗 **Рекомендации по питанию:**\n"
+        for rec in nutrition_recommendations:
             response += f"• {rec}\n"
+        response += "\n"
 
     # Краткое резюме
     if summary:
-        response += f"\n📝 {summary}"
+        response += f"📝 {summary}\n"
 
     # Сохраняем в память пользователя
     memory_parts = []
+
+    # Сохраняем диагноз
+    if diagnosis:
+        memory_parts.append(f"Диагноз: {diagnosis}")
 
     # Сохраняем проблемные показатели
     problem_indicators = [
@@ -1483,7 +1540,7 @@ async def handle_medical_photo(user_id: int, medical_data: dict) -> str:
     ]
 
     if problem_indicators:
-        for ind in problem_indicators:
+        for ind in problem_indicators[:5]:  # Максимум 5 показателей
             name = ind.get("name", "?")
             status = ind.get("status")
             value = ind.get("value", "?")
@@ -1493,16 +1550,26 @@ async def handle_medical_photo(user_id: int, medical_data: dict) -> str:
             memory_text = f"{name} {status_text}: {value} {unit}"
             memory_parts.append(memory_text)
 
-    # Сохраняем рекомендации
-    if recommendations:
-        for rec in recommendations[:3]:  # Максимум 3 рекомендации
-            memory_parts.append(f"Рекомендация: {rec}")
+    # Сохраняем ключевые выводы
+    if findings:
+        for finding in findings[:3]:
+            memory_parts.append(f"Вывод врача: {finding}")
+
+    # Сохраняем рекомендации врача
+    if recommendations_from_doc:
+        for rec in recommendations_from_doc[:3]:
+            memory_parts.append(f"Рекомендация врача: {rec}")
+
+    # Сохраняем рекомендации по питанию
+    if nutrition_recommendations:
+        for rec in nutrition_recommendations[:3]:
+            memory_parts.append(f"Рекомендация по питанию: {rec}")
 
     # Записываем в память
     if memory_parts:
         for memory_text in memory_parts:
             await save_memory(user_id, "medical", memory_text)
 
-        response += "\n\n📝 _Запомнил для будущих рекомендаций_"
+        response += "\n💾 _Запомнил для будущих рекомендаций_"
 
     return response

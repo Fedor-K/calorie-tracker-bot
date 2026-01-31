@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
@@ -151,7 +151,7 @@ async def save_weight(user_id: int, weight: float, message: Message):
 
     if prev_entry:
         diff = weight - prev_entry.weight
-        days = (datetime.utcnow() - prev_entry.created_at).days
+        days = (datetime.now(timezone.utc).replace(tzinfo=None) - prev_entry.created_at).days
 
         if diff > 0:
             response += f"📈 +{diff:.1f} кг"

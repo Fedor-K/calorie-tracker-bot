@@ -3,7 +3,7 @@
 - Сохранение и получение истории сообщений
 - Сохранение и получение долгосрочной памяти (факты о пользователе)
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,7 +88,7 @@ async def clear_old_messages(user_id: int, days: int = 7) -> int:
     Returns:
         Количество удалённых записей
     """
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
     async with async_session() as session:
         result = await session.execute(
@@ -124,9 +124,10 @@ async def save_memory(
             .where(UserMemory.category == category)
             .where(UserMemory.content == content)
         )
-        if existing.scalar_one_or_none():
+        existing_memory = existing.scalar_one_or_none()
+        if existing_memory:
             # Уже есть такой факт
-            return existing.scalar_one()
+            return existing_memory
 
         memory = UserMemory(
             user_id=user_id,
@@ -255,7 +256,7 @@ async def update_memory(
 
         if memory:
             memory.content = new_content
-            memory.updated_at = datetime.utcnow()
+            memory.updated_at = datetime.now(timezone.utc)
             await session.commit()
             await session.refresh(memory)
             return memory

@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
@@ -22,9 +23,19 @@ async def handle_activity_button(message: Message, state: FSMContext):
     user_id = message.from_user.id
 
     # Получаем статистику за сегодня
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-
     async with async_session() as session:
+        user_result = await session.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+
+        try:
+            tz = ZoneInfo(user.timezone if user else "Europe/Moscow")
+        except Exception:
+            tz = ZoneInfo("Europe/Moscow")
+
+        now_local = datetime.now(tz)
+        day_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = day_start_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
         result = await session.execute(
             select(
                 func.sum(ActivityEntry.duration),

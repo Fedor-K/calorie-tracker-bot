@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from sqlalchemy import select, func
@@ -11,14 +12,24 @@ router = Router()
 
 
 async def get_today_water(user_id: int) -> int:
-    """Получить количество воды за сегодня"""
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-
+    """Получить количество воды за сегодня (с учётом часового пояса пользователя)"""
     async with async_session() as session:
+        user_result = await session.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+
+        try:
+            tz = ZoneInfo(user.timezone if user else "Europe/Moscow")
+        except Exception:
+            tz = ZoneInfo("Europe/Moscow")
+
+        now_local = datetime.now(tz)
+        day_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start_utc = day_start_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
         result = await session.execute(
             select(func.sum(WaterEntry.amount))
             .where(WaterEntry.user_id == user_id)
-            .where(WaterEntry.created_at >= today_start)
+            .where(WaterEntry.created_at >= day_start_utc)
         )
         total = result.scalar_one_or_none()
         return total or 0

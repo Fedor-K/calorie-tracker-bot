@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from aiogram import Router, F
 from aiogram.types import Message
@@ -14,7 +14,7 @@ def get_day_bounds(timezone: str = "Europe/Moscow", days_ago: int = 0):
     """Получить начало и конец дня в UTC с учётом часового пояса пользователя"""
     try:
         tz = ZoneInfo(timezone)
-    except:
+    except Exception:
         tz = ZoneInfo("Europe/Moscow")
 
     # Текущее время в часовом поясе пользователя
@@ -45,7 +45,7 @@ async def cmd_stats(message: Message):
     if len(parts) > 1:
         try:
             days_ago = int(parts[1])
-        except:
+        except Exception:
             pass
     await show_daily_stats(message, days_ago=days_ago)
 
@@ -189,7 +189,7 @@ async def show_daily_stats(message: Message, days_ago: int = 0):
 async def show_weekly_stats(message: Message):
     """Показать статистику за неделю"""
     user_id = message.from_user.id
-    week_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=7)
+    week_start = datetime.now(timezone.utc).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0) - timedelta(days=7)
 
     async with async_session() as session:
         user_result = await session.execute(select(User).where(User.id == user_id))

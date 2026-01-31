@@ -14,9 +14,43 @@ def get_user_local_hour(user: User) -> int:
     """Получить текущий час в часовом поясе пользователя"""
     try:
         tz = ZoneInfo(user.timezone or "Europe/Moscow")
-    except:
+    except Exception:
         tz = ZoneInfo("Europe/Moscow")
     return datetime.now(tz).hour
+
+
+def get_user_local_date_hour(user: User) -> str:
+    """Получить дату и час в формате 'YYYY-MM-DD-HH' для трекинга"""
+    try:
+        tz = ZoneInfo(user.timezone or "Europe/Moscow")
+    except Exception:
+        tz = ZoneInfo("Europe/Moscow")
+    now = datetime.now(tz)
+    return now.strftime("%Y-%m-%d-%H")
+
+
+# Трекинг отправленных напоминаний: {(user_id, type, date_hour): True}
+_sent_reminders: dict[tuple, bool] = {}
+
+
+def was_reminder_sent(user_id: int, reminder_type: str, date_hour: str) -> bool:
+    """Проверить, было ли напоминание уже отправлено"""
+    key = (user_id, reminder_type, date_hour)
+    return _sent_reminders.get(key, False)
+
+
+def mark_reminder_sent(user_id: int, reminder_type: str, date_hour: str):
+    """Отметить напоминание как отправленное"""
+    key = (user_id, reminder_type, date_hour)
+    _sent_reminders[key] = True
+
+    # Очистка старых записей (оставляем только за последние 24 часа)
+    if len(_sent_reminders) > 1000:
+        current_date = date_hour[:10]  # YYYY-MM-DD
+        keys_to_remove = [k for k in _sent_reminders if k[2][:10] < current_date]
+        for k in keys_to_remove:
+            del _sent_reminders[k]
+
 
 scheduler = AsyncIOScheduler()
 
@@ -51,10 +85,15 @@ async def send_water_reminder(bot: Bot):
             if local_hour not in water_hours:
                 continue
 
+            # Проверяем, не отправляли ли уже
+            date_hour = get_user_local_date_hour(user)
+            if was_reminder_sent(user.id, "water", date_hour):
+                continue
+
             # Получаем начало дня в часовом поясе пользователя
             try:
                 tz = ZoneInfo(user.timezone or "Europe/Moscow")
-            except:
+            except Exception:
                 tz = ZoneInfo("Europe/Moscow")
             now_local = datetime.now(tz)
             day_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -81,6 +120,7 @@ async def send_water_reminder(bot: Bot):
                         reply_markup=get_water_reminder_keyboard(),
                         parse_mode="Markdown"
                     )
+                    mark_reminder_sent(user.id, "water", date_hour)
                 except Exception:
                     pass
 
@@ -101,10 +141,15 @@ async def send_food_reminder(bot: Bot):
             if local_hour not in food_hours:
                 continue
 
+            # Проверяем, не отправляли ли уже
+            date_hour = get_user_local_date_hour(user)
+            if was_reminder_sent(user.id, "food", date_hour):
+                continue
+
             # Получаем начало дня в часовом поясе пользователя
             try:
                 tz = ZoneInfo(user.timezone or "Europe/Moscow")
-            except:
+            except Exception:
                 tz = ZoneInfo("Europe/Moscow")
             now_local = datetime.now(tz)
             day_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -127,6 +172,7 @@ async def send_food_reminder(bot: Bot):
                         f"Сегодня: {total_calories} / {user.calorie_goal} ккал\n\n"
                         f"Отправь фото еды для подсчёта калорий"
                     )
+                    mark_reminder_sent(user.id, "food", date_hour)
                 except Exception:
                     pass
 
@@ -144,12 +190,18 @@ async def send_weight_reminder(bot: Bot):
             if get_user_local_hour(user) != 8:
                 continue
 
+            # Проверяем, не отправляли ли уже
+            date_hour = get_user_local_date_hour(user)
+            if was_reminder_sent(user.id, "weight", date_hour):
+                continue
+
             try:
                 await bot.send_message(
                     user.id,
                     f"⚖️ Не забудь взвеситься!\n\n"
                     f"Запиши вес: /weight 75.5"
                 )
+                mark_reminder_sent(user.id, "weight", date_hour)
             except Exception:
                 pass
 
@@ -175,6 +227,11 @@ async def send_sleep_reminder(bot: Bot):
             if get_user_local_hour(user) != 22:
                 continue
 
+            # Проверяем, не отправляли ли уже
+            date_hour = get_user_local_date_hour(user)
+            if was_reminder_sent(user.id, "sleep", date_hour):
+                continue
+
             try:
                 await bot.send_message(
                     user.id,
@@ -188,6 +245,7 @@ async def send_sleep_reminder(bot: Bot):
                     reply_markup=get_sleep_reminder_keyboard(),
                     parse_mode="Markdown"
                 )
+                mark_reminder_sent(user.id, "sleep", date_hour)
             except Exception:
                 pass
 
@@ -203,10 +261,15 @@ async def send_daily_summary(bot: Bot):
             if get_user_local_hour(user) != 21:
                 continue
 
+            # Проверяем, не отправляли ли уже
+            date_hour = get_user_local_date_hour(user)
+            if was_reminder_sent(user.id, "summary", date_hour):
+                continue
+
             # Получаем начало дня в часовом поясе пользователя
             try:
                 tz = ZoneInfo(user.timezone or "Europe/Moscow")
-            except:
+            except Exception:
                 tz = ZoneInfo("Europe/Moscow")
             now_local = datetime.now(tz)
             day_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -242,6 +305,7 @@ async def send_daily_summary(bot: Bot):
                         f"Хорошего вечера! 🌙",
                         parse_mode="Markdown"
                     )
+                    mark_reminder_sent(user.id, "summary", date_hour)
                 except Exception:
                     pass
 

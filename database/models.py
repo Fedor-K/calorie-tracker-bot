@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import BigInteger, String, Float, Integer, DateTime, Text, Boolean, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -36,7 +36,7 @@ class User(Base):
     remind_food: Mapped[bool] = mapped_column(Boolean, default=True)
     remind_weight: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     food_entries: Mapped[list["FoodEntry"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -68,7 +68,7 @@ class FoodEntry(Base):
     photo_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ai_raw_response: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     user: Mapped["User"] = relationship(back_populates="food_entries")
 
@@ -82,7 +82,7 @@ class WeightEntry(Base):
     weight: Mapped[float] = mapped_column(Float)  # кг
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     user: Mapped["User"] = relationship(back_populates="weight_entries")
 
@@ -95,7 +95,7 @@ class WaterEntry(Base):
 
     amount: Mapped[int] = mapped_column(Integer)  # мл
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     user: Mapped["User"] = relationship(back_populates="water_entries")
 
@@ -111,7 +111,7 @@ class ActivityEntry(Base):
     calories_burned: Mapped[int] = mapped_column(Integer, default=0)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     user: Mapped["User"] = relationship(back_populates="activity_entries")
 
@@ -124,7 +124,7 @@ class ConversationMessage(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
     role: Mapped[str] = mapped_column(String(20))  # "user" | "assistant"
     content: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     user: Mapped["User"] = relationship(back_populates="conversation_messages")
 
@@ -137,7 +137,7 @@ class UserMemory(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
     category: Mapped[str] = mapped_column(String(50))  # preference, habit, restriction, goal, fact
     content: Mapped[str] = mapped_column(Text)  # "не ест молочку", "тренируется по утрам"
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     user: Mapped["User"] = relationship(back_populates="user_memories")
