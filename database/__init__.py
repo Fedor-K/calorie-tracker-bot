@@ -1,11 +1,10 @@
-from database.db import get_session, init_db
+from database.db import init_db
 from database.models import (
     User, FoodEntry, WeightEntry, WaterEntry, ActivityEntry,
     ConversationMessage, UserMemory
 )
 
 __all__ = [
-    "get_session",
     "init_db",
     "User",
     "FoodEntry",
