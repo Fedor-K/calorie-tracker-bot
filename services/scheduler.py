@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -6,8 +7,10 @@ from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select, func
 
+logger = logging.getLogger(__name__)
+
 from database.db import async_session
-from database.models import User, WaterEntry, FoodEntry
+from database.models import User, WaterEntry, FoodEntry, TrendSubscription
 
 
 def get_user_local_hour(user: User) -> int:
@@ -362,5 +365,137 @@ def setup_scheduler(bot: Bot):
         replace_existing=True
     )
 
+    # =============================================
+    # Trend Watcher Jobs
+    # =============================================
+
+    # Collect new trends every 4 hours
+    scheduler.add_job(
+        run_trend_collection,
+        CronTrigger(hour="*/4", minute=15),
+        args=[bot],
+        id="trend_collection",
+        replace_existing=True
+    )
+
+    # Analyze/score new trends every 4 hours (15 min after collection)
+    scheduler.add_job(
+        run_trend_analysis,
+        CronTrigger(hour="*/4", minute=30),
+        args=[bot],
+        id="trend_analysis",
+        replace_existing=True
+    )
+
+    # Generate and send daily digests at 10:00 UTC
+    scheduler.add_job(
+        send_trend_digests,
+        CronTrigger(hour=10, minute=0),
+        args=[bot],
+        id="trend_daily_digest",
+        replace_existing=True
+    )
+
+    # Cleanup old trend entries monthly
+    scheduler.add_job(
+        run_trend_cleanup,
+        CronTrigger(day=1, hour=3, minute=0),
+        args=[bot],
+        id="trend_cleanup",
+        replace_existing=True
+    )
+
     scheduler.start()
     return scheduler
+
+
+# ============================================================================
+# Trend Watcher Scheduled Functions
+# ============================================================================
+
+async def run_trend_collection(bot: Bot):
+    """Collect new trend entries from all sources"""
+    from services.trends import collect_trends
+    try:
+        count = await collect_trends()
+        logger.info(f"[Scheduler] Collected {count} new trend entries")
+    except Exception as e:
+        logger.error(f"[Scheduler] Trend collection failed: {e}")
+
+
+async def run_trend_analysis(bot: Bot):
+    """Analyze and score recently collected trends"""
+    from services.trends import analyze_and_score_trends
+    try:
+        count = await analyze_and_score_trends()
+        logger.info(f"[Scheduler] Analyzed {count} trend entries")
+    except Exception as e:
+        logger.error(f"[Scheduler] Trend analysis failed: {e}")
+
+
+async def send_trend_digests(bot: Bot):
+    """Generate digests and send to subscribed users"""
+    from services.trends import generate_digest, get_latest_digest
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(TrendSubscription).where(TrendSubscription.is_active == True)
+        )
+        subscriptions = result.scalars().all()
+
+    if not subscriptions:
+        return
+
+    # Group by category and generate digests as needed
+    categories_needed = set()
+    for sub in subscriptions:
+        if sub.frequency == "daily":
+            categories_needed.add(sub.category)
+
+    # Generate digests
+    digests = {}
+    for cat in categories_needed:
+        digest = await generate_digest(category=cat, period="daily")
+        if digest:
+            digests[cat] = digest
+
+    # Send to users
+    for sub in subscriptions:
+        if sub.frequency != "daily":
+            continue
+        digest = digests.get(sub.category)
+        if not digest:
+            continue
+
+        # Check dedup
+        date_hour = get_user_local_date_hour_for_user_id(sub.user_id)
+        if was_reminder_sent(sub.user_id, f"trend_digest_{sub.category}", date_hour):
+            continue
+
+        try:
+            text = digest.content
+            if len(text) > 4000:
+                text = text[:3990] + "..."
+            await bot.send_message(
+                sub.user_id,
+                text,
+                disable_web_page_preview=True,
+            )
+            mark_reminder_sent(sub.user_id, f"trend_digest_{sub.category}", date_hour)
+        except Exception:
+            pass
+
+
+def get_user_local_date_hour_for_user_id(user_id: int) -> str:
+    """Fallback date-hour string using UTC (used when we don't have the User object)"""
+    now = datetime.now(ZoneInfo("UTC"))
+    return now.strftime("%Y-%m-%d-%H")
+
+
+async def run_trend_cleanup(bot: Bot):
+    """Clean up old trend entries"""
+    from services.trends import cleanup_old_entries
+    try:
+        await cleanup_old_entries(days=30)
+    except Exception as e:
+        logger.error(f"[Scheduler] Trend cleanup failed: {e}")

@@ -39,6 +39,11 @@ async def main():
     await init_db()
     logger.info("База данных готова")
 
+    # Инициализируем источники трендов
+    from services.trends import init_default_sources
+    logger.info("Инициализация источников трендов...")
+    await init_default_sources()
+
     # Создаём бота и диспетчер
     bot = Bot(
         token=config.TELEGRAM_BOT_TOKEN,

@@ -11,6 +11,7 @@ from handlers.settings import router as settings_router
 from handlers.weight import router as weight_router
 from handlers.activity import router as activity_router
 from handlers.health import router as health_router
+from handlers.trends import router as trends_router
 
 
 def setup_routers() -> Router:
@@ -34,6 +35,7 @@ def setup_routers() -> Router:
     main_router.include_router(weight_router)
     main_router.include_router(activity_router)
     main_router.include_router(health_router)
+    main_router.include_router(trends_router)
 
     # 5. Chat - главный AI handler для текста (должен быть последним!)
     main_router.include_router(chat_router)

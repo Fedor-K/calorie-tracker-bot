@@ -19,6 +19,9 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(text="🍽 План питания"),
+                KeyboardButton(text="📈 Тренды")
+            ],
+            [
                 KeyboardButton(text="⚙️ Настройки")
             ]
         ],
